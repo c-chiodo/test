@@ -3,11 +3,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 node_modules/
-web/dist/
 soyoil/data/cache/
-soyoil/models/*.joblib
-soyoil/models/*.parquet
-soyoil/models/meta.json
+# web/dist and soyoil/models artifacts are committed on purpose so cloud
+# hosts can serve the app with a plain `pip install` — no Node, no training.
 nohup.out
 *.log
 web/tsconfig.tsbuildinfo

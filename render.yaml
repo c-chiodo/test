@@ -1,0 +1,14 @@
+# Render Blueprint — deploys OleoCast as a single web service.
+# In Render: New + > Blueprint > pick this repo/branch > Apply.
+services:
+  - type: web
+    name: oleocast
+    runtime: python
+    plan: free
+    branch: claude/soybean-yield-prediction-mi5fcw
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn api.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.7"
+    healthCheckPath: /api/health

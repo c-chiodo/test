@@ -104,6 +104,28 @@ reference lists) live in `research/`:
   engineering practice, validation protocol, conformal uncertainty design,
   and a "claims we must not make" list
 
+## Hosting
+
+The repo is deploy-ready: the built frontend (`web/dist/`) and trained model
+bundle (`soyoil/models/`) are committed, so a host only needs Python.
+
+**Render (recommended, free tier):** connect your GitHub account at
+render.com → *New + → Blueprint* → pick this repo and branch → Apply. The
+included `render.yaml` does the rest; the service comes up at
+`https://<name>.onrender.com` with `/api/health` as the health check.
+Free-tier services sleep when idle — the first request after a quiet spell
+takes ~a minute.
+
+**Any other host** (Railway, Fly.io, a VM): `pip install -r requirements.txt`
+then `uvicorn api.main:app --host 0.0.0.0 --port $PORT` (see `Procfile`).
+
+**Office LAN only:** `uvicorn api.main:app --host 0.0.0.0 --port 8000` on
+your machine, then colleagues browse to `http://<your-ip>:8000`.
+
+Note: a hosted demo is public to anyone with the URL — it ships no
+authentication. Keep internal commercial data out of it (the app serves only
+the demo counties and model outputs).
+
 ## Roadmap to production
 
 1. NASS Quick Stats connector → real county yield labels (free API key)
