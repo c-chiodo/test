@@ -70,6 +70,19 @@ def test_current_stage_progression():
     assert tl.current_stage(date(2024, 12, 1)) == "R8"
 
 
+def test_r5_timing_matches_extension_windows():
+    """QA-audit calibration gate: R5 for MG 2.6 @ 42°N, ~May-10 planting must
+    land 75-95 days after planting (extension/SoyStage range) in a normals-like
+    year — the demo must not run weeks late."""
+    from statistics import mean
+
+    daps = []
+    for seed in range(6):
+        tl, r = _timeline("story-ia", 2024, seed=seed)
+        daps.append((tl.stage_dates["R5"] - tl.planting).days)
+    assert 72 <= mean(daps) <= 95, f"mean R5 DAP {mean(daps)} outside 72-95 (per-seed {daps})"
+
+
 def test_frost_termination_bounds_cool_years():
     # Even a strongly cool year must not stall past the calendar year.
     for seed in range(5):

@@ -43,8 +43,9 @@ Do not quote the numbers below to customers as field accuracy.
 - **Baselines that must be beaten:** global mean and region-mean +
   linear year trend, both evaluated out-of-year. Skill = 1 − RMSE/RMSE_trend.
 - **Conformal intervals** calibrated on out-of-fold (held-out-year)
-  absolute residuals; coverage is checked empirically on the same
-  out-of-fold predictions.
+  absolute residuals. Reported coverage is non-circular: for each year, the
+  quantile is calibrated on the other years' residuals and evaluated on
+  that year alone, then averaged.
 - No `year` feature enters the models (trees cannot extrapolate a trend);
   the synthetic genetic-gain trend is absorbed by residuals/baselines.
 
@@ -52,16 +53,20 @@ Do not quote the numbers below to customers as field accuracy.
 
 Regenerate with `python -m soyoil.train`; served live at `/api/model/meta`.
 
-| Target | RMSE | R² | Baseline (trend) RMSE | Skill | 90% interval ± | Coverage |
-|---|---|---|---|---|---|---|
-| yield_bu_ac | 6.02 | 0.76 | 11.13 | 46% | 9.77 | 0.90 |
-| oil_pct | 0.50 | 0.85 | 1.07 | 53% | 0.83 | 0.90 |
-| protein_pct | 0.65 | 0.72 | 1.08 | 39% | 1.08 | 0.90 |
-| oleic_pct | 1.37 | 0.89 | 3.37 | 59% | 2.18 | 0.90 |
-| linoleic_pct | 1.34 | 0.78 | 2.44 | 45% | 2.22 | 0.90 |
-| linolenic_pct | 0.55 | 0.84 | 1.15 | 52% | 0.93 | 0.90 |
+| Target | RMSE | R² | Skill vs trend baseline | 90% interval ± | Held-out coverage |
+|---|---|---|---|---|---|
+| yield_bu_ac | 6.04 | 0.71 | 40% | 9.60 | 0.901 |
+| oil_pct | 0.50 | 0.58 | 27% | 0.82 | 0.899 |
+| protein_pct | 0.66 | 0.25 | 10% | 1.07 | 0.900 |
+| oleic_pct | 1.09 | 0.89 | 60% | 1.83 | 0.898 |
+| linoleic_pct | 1.00 | 0.82 | 48% | 1.62 | 0.900 |
+| linolenic_pct | 0.52 | 0.79 | 45% | 0.84 | 0.900 |
 
-(Exact numbers vary slightly per retrain; `/api/model/meta` is authoritative.)
+(Exact numbers vary slightly per retrain; `/api/model/meta` is authoritative.
+Coverage is measured non-circularly: for each held-out year the quantile is
+calibrated on the *other* years' out-of-fold residuals. Note protein skill is
+weak — consistent with the published weather-only literature — and is
+reported for crush arithmetic, not sold as a prediction.)
 
 ## Known limitations
 

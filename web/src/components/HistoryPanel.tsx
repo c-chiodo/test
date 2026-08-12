@@ -56,8 +56,9 @@ export default function HistoryPanel({
     <div className="panel">
       <h3>This season vs. history</h3>
       <p className="note">
-        Retrospective model outcomes for the last {history.years.length}{" "}
-        seasons in this region, against the current {fc.year} forecast.
+        Retrospective <b>model estimates</b> for the last{" "}
+        {history.years.length} seasons (driven by the labeled weather source,
+        not USDA records), against the current {fc.year} forecast.
       </p>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>

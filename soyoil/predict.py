@@ -226,6 +226,7 @@ def _season_outcome(region_id: str, year: int) -> dict:
     fc = forecast(region_id, year, as_of=date(year, 11, 15),
                   with_drivers=False, with_weather=False)
     return {
+        "provenance": f"retrospective-model-estimate ({fc.weather_source})",
         "year": year,
         "yield_bu_ac": fc.predictions["yield_bu_ac"].value,
         "oil_pct": fc.predictions["oil_pct"].value,
@@ -260,7 +261,15 @@ def history_comparison(
             "max": round(float(vals.max()), 2),
             "std": round(float(vals.std(ddof=1)), 2),
         }
-    return {"region_id": region_id, "years": rows, "stats": stats}
+    return {
+        "region_id": region_id,
+        "provenance": (
+            "Historical values are retrospective MODEL estimates driven by the "
+            "weather source named per year — they are not USDA/NASS records."
+        ),
+        "years": rows,
+        "stats": stats,
+    }
 
 
 def season_progression(
@@ -280,6 +289,7 @@ def season_progression(
         out.append({
             "as_of": d.isoformat(),
             "stage": fc.current_stage,
+            "weather_source": fc.weather_source,
             "coverage": fc.season_coverage,
             "yield": fc.predictions["yield_bu_ac"].__dict__,
             "oil": fc.predictions["oil_pct"].__dict__,

@@ -8,14 +8,16 @@ two purposes:
   2. Sanity-check trained models: SHAP directions must agree with these signs.
 
 Key relationships encoded (all during R5–R6 seed fill unless noted):
-  * Oil %: rises with temperature to an optimum near 25–28 °C mean, then
-    falls under heat stress; drought during fill lowers oil; strong inverse
-    oil↔protein relationship (slope ≈ -0.55 pt protein per +1 pt oil is the
-    commonly reported tradeoff direction; we generate protein from oil).
+  * Oil %: rises with temperature to an optimum near 28 °C mean, then falls
+    steeply under heat (≈ -0.4 pt/°C near 32 °C, Dornbos & Mullen 1992);
+    drought during fill lowers oil; warm nights (high Tmin / low DTR) depress
+    oil (Zhang et al. 2016); inverse oil↔protein relationship (≈ -0.6 pt
+    protein per +1 pt oil; we generate protein from oil).
   * Yield: hurt by heat (days >30/35 °C in flowering+fill), drought stress in
     the R1–R6 critical window, helped by August precipitation and radiation.
   * Fatty acids: higher fill temperature → oleic up, linoleic/linolenic down;
-    drought pushes the same direction with smaller magnitude.
+    drought during fill lowers oleic and raises stearic (Dornbos & Mullen)
+    while also depressing linolenic.
 """
 
 from __future__ import annotations
@@ -43,13 +45,17 @@ class SeedOutcome:
 
 
 def _oil_temperature_response(fill_tmean_c: float) -> float:
-    """Deviation in oil percentage points from a 21.0 base as a quadratic in
-    mean seed-fill temperature. Unimodal with optimum ~28 °C — reconciles
-    Piper & Boote 1999 (oil rises with T in field data, which samples below
-    the optimum) with Gibson & Mullen / Dornbos & Mullen (oil falls under
-    controlled heat, above the optimum; ≈ -0.4 pt/°C near 32 °C)."""
+    """Deviation in oil percentage points from a 21.0 base as an asymmetric
+    quadratic in mean seed-fill temperature. Unimodal with optimum ~28 °C —
+    reconciles Piper & Boote 1999 (oil rises with T in field data, which
+    samples below the optimum) with Gibson & Mullen / Dornbos & Mullen (oil
+    falls under controlled heat above the optimum). The hot limb is steeper
+    than the cool limb: -0.055·(T-28)² gives ≈ -0.44 pt/°C at 32 °C,
+    matching Dornbos & Mullen's ≈ -0.43 pt/°C."""
     t_opt = 28.0
-    return -0.022 * (fill_tmean_c - t_opt) ** 2 + 0.75
+    dev = fill_tmean_c - t_opt
+    coef = 0.055 if dev > 0 else 0.014
+    return -coef * dev**2 + 0.75
 
 
 def expected_outcome(f: dict[str, float], rng: np.random.Generator | None = None,
@@ -89,8 +95,9 @@ def expected_outcome(f: dict[str, float], rng: np.random.Generator | None = None
     oil += _oil_temperature_response(f["fill_tmean_c"])
     # Heat stress days during fill beyond the dome (extreme days hurt oil)
     oil -= 0.030 * f["fill_days_gt35"]
-    # Warm nights during fill mildly raise oil up to a point (night T effect)
-    oil += 0.012 * min(f["fill_night_warm"], 25.0)
+    # Warm nights (high Tmin / low DTR) during fill depress oil
+    # (Zhang et al. 2016: Tmin negative, DTR positive for oil)
+    oil -= 0.012 * min(f["fill_night_warm"], 25.0)
     # Drought during seed fill reduces oil
     oil -= 2.2 * f["fill_stress_water"]
     # Radiation during fill raises oil (assimilate supply), per 100 MJ
@@ -103,31 +110,35 @@ def expected_outcome(f: dict[str, float], rng: np.random.Generator | None = None
     oil = float(np.clip(oil, 16.5, 24.5))
 
     # ---------------- protein % (inverse to oil) ----------------
-    protein = 34.5 - 0.85 * (oil - 21.0)
+    protein = 34.5 - 0.60 * (oil - 21.0)
     protein += 1.2 * f["fill_stress_water"]  # drought raises protein
     protein = float(np.clip(protein, 30.0, 39.5))
 
     # ---------------- fatty acid profile (% of oil) ----------------
     t_dev = f["fill_tmean_c"] - 23.0
     drought = f["fill_stress_water"]
-    oleic = 23.0 + 1.1 * t_dev + 4.0 * drought
-    linolenic = 8.0 - 0.35 * t_dev - 1.5 * drought
-    linoleic = 54.0 - 0.75 * t_dev - 2.5 * drought
+    # Drought lowers oleic and raises stearic (Dornbos & Mullen 1992);
+    # temperature raises oleic and lowers the polyunsaturates.
+    oleic = 23.0 + 1.1 * t_dev - 3.0 * drought
+    linolenic = 8.0 - 0.35 * t_dev - 1.0 * drought
+    linoleic = 54.0 - 0.75 * t_dev + 1.5 * drought
     palmitic = 11.0 - 0.05 * t_dev
-    stearic = 4.0 + 0.05 * t_dev
-    # normalize to 100
-    total = oleic + linoleic + linolenic + palmitic + stearic
-    oleic, linoleic, linolenic, palmitic, stearic = (
-        100.0 * x / total for x in (oleic, linoleic, linolenic, palmitic, stearic)
-    )
+    stearic = 4.0 + 0.05 * t_dev + 1.0 * drought
 
     if rng is not None:
         y = max(5.0, y + rng.normal(0, 4.5))          # residual yield noise
         oil = float(np.clip(oil + rng.normal(0, 0.45), 16.0, 25.0))
         protein = float(np.clip(protein + rng.normal(0, 0.6), 29.0, 40.0))
-        oleic += rng.normal(0, 1.2)
-        linoleic += rng.normal(0, 1.2)
+        oleic = max(12.0, oleic + rng.normal(0, 1.2))
+        linoleic = max(40.0, linoleic + rng.normal(0, 1.2))
         linolenic = max(2.0, linolenic + rng.normal(0, 0.5))
+
+    # Normalize the profile to 100% AFTER noise so no component can drift
+    # to a physically impossible share.
+    total = oleic + linoleic + linolenic + palmitic + stearic
+    oleic, linoleic, linolenic, palmitic, stearic = (
+        100.0 * x / total for x in (oleic, linoleic, linolenic, palmitic, stearic)
+    )
 
     return SeedOutcome(
         yield_bu_ac=float(y), oil_pct=float(oil), protein_pct=float(protein),
@@ -143,6 +154,6 @@ EXPECTED_SIGNS = {
                     "fill_days_gt35": -1, "aug_precip_mm": +1, "fill_srad_mj": +1},
     "oil_pct": {"fill_stress_water": -1, "fill_srad_mj": +1},
     "protein_pct": {"fill_stress_water": +1},
-    "oleic_pct": {"fill_tmean_c": +1, "fill_stress_water": +1},
+    "oleic_pct": {"fill_tmean_c": +1, "fill_stress_water": -1},
     "linolenic_pct": {"fill_tmean_c": -1},
 }

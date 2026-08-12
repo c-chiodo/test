@@ -93,9 +93,20 @@ def loyo_validate(df: pd.DataFrame, target: str) -> tuple[np.ndarray, TargetRepo
     b_mean = float(np.sqrt(np.mean((mean_pred - y) ** 2)))
     b_trend = float(np.sqrt(np.mean((trend_pred - y) ** 2)))
 
-    # Split-conformal on LOYO residuals (already out-of-fold → honest)
+    # Split-conformal on LOYO residuals for the deployed quantile.
     q90 = float(np.quantile(np.abs(resid), 0.90))
-    coverage = float(np.mean(np.abs(resid) <= q90))
+    # Honest coverage: for each held-out year, calibrate the quantile on the
+    # OTHER years' out-of-fold residuals and measure coverage on that year —
+    # calibration and evaluation never share residuals (the naive check,
+    # quantile and coverage on the same pool, is circular and returns 0.90
+    # by construction).
+    abs_resid = np.abs(resid)
+    cov_years = []
+    for yr in np.unique(years):
+        te = years == yr
+        q_other = np.quantile(abs_resid[~te], 0.90)
+        cov_years.append(float(np.mean(abs_resid[te] <= q_other)))
+    coverage = float(np.mean(cov_years))
 
     report = TargetReport(
         target=target, loyo_rmse=rmse, loyo_mae=mae, loyo_r2=r2,

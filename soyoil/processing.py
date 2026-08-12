@@ -1,9 +1,13 @@
 """Crush economics: translate seed composition into processing value.
 
 Standard soybean crush arithmetic per 60-lb bushel:
-  * Oil recovered  = 60 lb × oil% × extraction efficiency (solvent ~0.985 of
-    a practical ceiling; commonly quoted "11 lb oil per bushel" at 19% oil).
-  * Meal produced  ≈ 44 lb of 48%-protein meal + hulls, adjusted by protein.
+  * Oil recovered = 60 lb × oil% × extraction efficiency. Oil% here is the
+    industry as-is (13%-moisture) basis, so no additional moisture deduction:
+    19% oil × 60 lb × 0.96 recovery ≈ 10.9 lb — the commonly quoted
+    "~11 lb oil per bushel".
+  * Meal produced ≈ 44 lb of ~47.5%-protein meal per bushel; meal protein is
+    tied to seed protein by mass balance (seed protein lb ÷ meal lb), not an
+    arbitrary scale factor.
   * Estimated Processing Value (EPV) = oil lb × oil price + meal lb × meal
     price; crush margin = EPV − bean cost.
 
@@ -17,9 +21,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 BU_LB = 60.0
-SOLVENT_RECOVERY = 0.955          # fraction of seed oil recovered by solvent crush
-MEAL_YIELD_LB_PER_BU = 47.5       # meal+hulls at standard composition
-MOISTURE_STD = 0.13
+SOLVENT_RECOVERY = 0.96           # fraction of seed oil recovered by solvent crush
+MEAL_YIELD_LB_PER_BU = 44.0       # dehulled meal at standard composition
+PROTEIN_TO_MEAL_LOSS = 0.97       # protein retained through crush into meal
 
 
 @dataclass
@@ -55,11 +59,14 @@ def crush_value(
 ) -> CrushResult:
     a = a or CrushAssumptions()
 
-    oil_lb = BU_LB * (1 - MOISTURE_STD) * (oil_pct / 100.0) * SOLVENT_RECOVERY
-    # Meal: what's left after oil + moisture + processing loss; protein content
-    # of meal scales with seed protein (48% meal from ~35% seed protein).
+    # Oil % is the as-is (13% moisture) basis the industry trades on — apply
+    # it to the full 60-lb bushel, then extraction efficiency.
+    oil_lb = BU_LB * (oil_pct / 100.0) * SOLVENT_RECOVERY
+    # Meal mass shifts slightly opposite to oil content.
     meal_lb = MEAL_YIELD_LB_PER_BU + 0.4 * (21.0 - oil_pct)
-    meal_protein = 48.0 * (protein_pct / 35.0)
+    # Mass balance: seed protein lb flows into the meal (minus small loss).
+    # 35% seed protein × 60 lb ÷ 44 lb meal ≈ 46-48% meal protein.
+    meal_protein = (BU_LB * protein_pct / 100.0) * PROTEIN_TO_MEAL_LOSS / meal_lb * 100.0
 
     adj = 0.0
     if oleic_pct > 40.0:

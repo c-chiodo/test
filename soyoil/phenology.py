@@ -35,14 +35,15 @@ STAGES = ["VE", "V2", "R1", "R2", "R3", "R4", "R5", "R6", "R7", "R8"]
 # cultivar, midpoints of published extension ranges.
 _GDD_TARGETS_MG3 = {
     "VE": 90.0,     # emergence ~ 90-130 GDD10 after planting
-    "V2": 200.0,
-    "R1": 550.0,    # beginning bloom (~late June for early-May planting)
-    "R2": 640.0,
-    "R3": 750.0,    # beginning pod
-    "R4": 870.0,
-    "R5": 1000.0,   # beginning seed — start of the oil-critical window
-    "R6": 1270.0,   # full seed — end of most oil deposition
-    "R7": 1450.0,   # physiological maturity (~mid-late September)
+    "V2": 190.0,
+    "R1": 500.0,    # beginning bloom (~late June for early-May planting)
+    "R2": 580.0,
+    "R3": 680.0,    # beginning pod
+    "R4": 790.0,
+    "R5": 900.0,    # beginning seed — start of the oil-critical window
+                    # (DAP ~75-90 for MG 2.6 @ 42°N, May-10 planting)
+    "R6": 1150.0,   # full seed — end of most oil deposition
+    "R7": 1310.0,   # physiological maturity (~mid-late September)
 }
 
 # R7 -> R8 is drydown, driven by seed moisture loss rather than thermal time;

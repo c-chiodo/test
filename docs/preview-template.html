@@ -1,0 +1,407 @@
+<title>OleoCast Preview</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e;
+    --muted:#898781; --grid:#e1e0d9; --baseline:#c3c2b7;
+    --border:rgba(11,11,11,.1);
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+    --pos:#2a78d6; --neg:#e34948;
+    --good:#006300; --crit:#d03b3b; --warnbg:rgba(250,178,25,.09); --warnbar:#fab219;
+    --leaf:#1e5c33; --deep:#14351f; --oil:#d9a616;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7;
+      --muted:#898781; --grid:#2c2c2a; --baseline:#383835;
+      --border:rgba(255,255,255,.1);
+      --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+      --pos:#3987e5; --neg:#e66767;
+      --good:#0ca30c; --crit:#e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7;
+    --muted:#898781; --grid:#2c2c2a; --baseline:#383835;
+    --border:rgba(255,255,255,.1);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --pos:#3987e5; --neg:#e66767;
+    --good:#0ca30c; --crit:#e66767;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--page); color:var(--ink);
+    font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap { max-width:1120px; margin:0 auto; padding:0 20px; }
+  header.top {
+    position:sticky; top:0; z-index:30; border-bottom:1px solid var(--border);
+    background:color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter:blur(8px);
+  }
+  .top-inner { display:flex; align-items:center; gap:12px; height:54px; }
+  .logo { font-weight:800; font-size:18px; letter-spacing:-.02em; }
+  .logo span { color:var(--oil); }
+  .chip {
+    font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+    padding:3px 10px; border-radius:99px; color:var(--leaf);
+    background:color-mix(in srgb, var(--leaf) 12%, transparent);
+  }
+  .top-note { margin-left:auto; font-size:12px; color:var(--muted); }
+  .hero { padding:34px 0 10px; }
+  .hero h1 { font-size:clamp(24px,4vw,36px); letter-spacing:-.02em; margin:0 0 8px; text-wrap:balance; }
+  .hero p { color:var(--ink2); max-width:640px; margin:0; }
+  .regions { display:flex; flex-wrap:wrap; gap:8px; padding:20px 0 4px; }
+  .regions button {
+    font:inherit; font-size:13px; cursor:pointer; border-radius:99px;
+    padding:6px 14px; border:1px solid var(--baseline); background:var(--surface); color:var(--ink2);
+  }
+  .regions button.on { border-color:var(--leaf); color:var(--ink); font-weight:700;
+    background:color-mix(in srgb, var(--leaf) 10%, var(--surface)); }
+  .badges { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 16px; }
+  .badge { font-size:12px; color:var(--ink2); border:1px solid var(--border); background:var(--surface);
+    border-radius:99px; padding:3px 11px; }
+  .badge b { color:var(--ink); }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:14px; }
+  .tile { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:13px 15px; }
+  .tile .l { font-size:12px; color:var(--muted); display:flex; gap:6px; align-items:center; }
+  .tile .v { font-size:24px; font-weight:800; letter-spacing:-.02em; margin:2px 0;
+    font-variant-numeric:tabular-nums; }
+  .tile .v small { font-size:13px; font-weight:500; color:var(--ink2); }
+  .tile .r { font-size:12px; color:var(--ink2); font-variant-numeric:tabular-nums; }
+  .sw { width:10px; height:10px; border-radius:3px; display:inline-block; }
+  .panel { background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:16px 18px; margin-bottom:14px; }
+  .panel h3 { margin:0 0 2px; font-size:15px; }
+  .panel .note { color:var(--muted); font-size:12px; margin:0 0 12px; }
+  .g2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:880px){ .g2 { grid-template-columns:1fr; } }
+  .pheno { display:flex; height:38px; border-radius:8px; overflow:hidden; }
+  .pheno div { display:flex; align-items:center; justify-content:center; color:#fff;
+    font-size:11px; font-weight:700; white-space:nowrap; overflow:hidden; margin-right:2px; min-width:0; }
+  .pheno-leg { display:flex; flex-wrap:wrap; gap:6px 16px; margin-top:9px; font-size:12px; color:var(--ink2);
+    font-variant-numeric:tabular-nums; }
+  .pheno-leg b { color:var(--ink); }
+  svg text { font:11px system-ui,-apple-system,"Segoe UI",sans-serif; fill:var(--muted); }
+  svg .lbl { fill:var(--ink2); }
+  svg .em { fill:var(--ink); font-weight:700; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--muted); font-weight:600; padding:6px 9px; border-bottom:1px solid var(--grid); }
+  td { padding:6px 9px; border-bottom:1px solid var(--grid); font-variant-numeric:tabular-nums; }
+  tr:last-child td { border-bottom:none; }
+  .good { color:var(--good); font-weight:600; }
+  .crit { color:var(--crit); font-weight:600; }
+  .callout { font-size:12px; color:var(--muted); border-left:3px solid var(--warnbar);
+    background:var(--warnbg); padding:9px 13px; border-radius:0 8px 8px 0; margin:4px 0 30px; }
+  .seg { display:flex; gap:6px; margin-bottom:10px; flex-wrap:wrap; }
+  .seg button { font:inherit; font-size:12.5px; cursor:pointer; border-radius:8px; padding:4px 12px;
+    border:1px solid var(--baseline); background:var(--surface); color:var(--ink2); }
+  .seg button.on { border-color:var(--ink); color:var(--ink); font-weight:700; }
+  .tip { position:fixed; pointer-events:none; background:var(--surface); border:1px solid var(--border);
+    border-radius:8px; padding:6px 10px; font-size:12px; color:var(--ink); display:none; z-index:99;
+    box-shadow:0 4px 14px rgba(0,0,0,.12); font-variant-numeric:tabular-nums; }
+  footer { color:var(--muted); font-size:12.5px; padding:18px 0 40px; border-top:1px solid var(--border); }
+</style>
+
+<header class="top"><div class="wrap top-inner">
+  <div class="logo">OleoCast<span>●</span></div>
+  <span class="chip">Static preview</span>
+  <span class="top-note">Real output from the model pipeline · snapshot 2026-08-12</span>
+</div></header>
+
+<div class="wrap">
+  <section class="hero">
+    <h1>Soybean yield &amp; oil forecasts from public weather</h1>
+    <p>This is a frozen snapshot of the OleoCast dashboard — every number below was produced by
+    the actual phenology model, LightGBM forecasters, and crush-economics engine for the 2025 season,
+    forecast as of August 12. The full app adds live controls: forecast date, scenario sliders, and price decks.</p>
+  </section>
+
+  <nav class="regions" id="regions" aria-label="Region"></nav>
+  <div class="badges" id="badges"></div>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="panel">
+    <h3>Growth stages</h3>
+    <p class="note">Dated from accumulated growing degree days + photoperiod; stages after Aug 12 are projected with climate normals.</p>
+    <div class="pheno" id="pheno"></div>
+    <div class="pheno-leg" id="phenoLeg"></div>
+  </div>
+
+  <div class="g2">
+    <div class="panel">
+      <h3>Forecast evolution through the season</h3>
+      <p class="note">The yield forecast (line) and its 90% interval (band) as observed weather replaced climatology.</p>
+      <div id="prog"></div>
+    </div>
+    <div class="panel">
+      <h3>This season vs. the last 10</h3>
+      <p class="note">Bars are retrospective model outcomes for completed seasons; the dashed line is the 2025 forecast.</p>
+      <div class="seg" id="histSeg"></div>
+      <div id="hist"></div>
+    </div>
+  </div>
+
+  <div class="g2">
+    <div class="panel">
+      <h3>What's driving this forecast</h3>
+      <p class="note">SHAP attribution — bars push the yield forecast up (blue) or down (red) vs. an average season.</p>
+      <div id="drivers"></div>
+    </div>
+    <div class="panel">
+      <h3>Oil quality — fatty acid profile</h3>
+      <p class="note">Warmer, drier seed fill shifts oil toward oleic and away from linolenic.</p>
+      <div id="fatty"></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Crush economics</h3>
+    <p class="note">Standard crush arithmetic on the forecast composition (oil $0.47/lb · meal $340/ton · beans $10.60/bu).</p>
+    <div class="tiles" id="crush" style="margin-bottom:0"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Model validation — leave-one-year-out</h3>
+    <p class="note" id="valNote"></p>
+    <div style="overflow-x:auto"><table id="valTable"></table></div>
+  </div>
+
+  <div class="callout"><b>Honesty note:</b> demo models are trained on synthetic seasons generated from
+  published crop-response research (USDA ground-truth ingestion is the top roadmap item), and this sandbox
+  blocks live weather APIs, so weather here is a labeled climatology simulation. The metrics above measure
+  recovery of the published response structure — not field accuracy. Details: docs/MODEL_CARD.md in the repo.</div>
+
+  <footer>OleoCast — weather-driven soybean oil intelligence · full source on branch
+  <code>claude/soybean-yield-prediction-mi5fcw</code> · not trading or agronomic advice.</footer>
+</div>
+
+<div class="tip" id="tip"></div>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D = JSON.parse(document.getElementById('data').textContent);
+const $ = id => document.getElementById(id);
+const fmt = (v,d=1) => Number(v).toFixed(d);
+let region = 'story-ia';
+let histMetric = 'yield_bu_ac';
+
+const tip = $('tip');
+function showTip(e, html){ tip.innerHTML = html; tip.style.display='block';
+  tip.style.left = Math.min(e.clientX+14, innerWidth-180)+'px'; tip.style.top = (e.clientY+12)+'px'; }
+function hideTip(){ tip.style.display='none'; }
+
+function svgEl(w,h){ const s=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  s.setAttribute('viewBox',`0 0 ${w} ${h}`); s.style.width='100%'; s.style.display='block'; return s; }
+function add(p,t,a){ const e=document.createElementNS('http://www.w3.org/2000/svg',t);
+  for(const k in a) e.setAttribute(k,a[k]); p.appendChild(e); return e; }
+
+function renderRegions(){
+  const n = $('regions'); n.innerHTML='';
+  D.regions.forEach(r=>{
+    const b=document.createElement('button');
+    b.textContent=`${r.name}, ${r.state}`;
+    b.className = r.region_id===region?'on':'';
+    b.onclick=()=>{ region=r.region_id; renderAll(); };
+    n.appendChild(b);
+  });
+}
+
+function renderBadges(){
+  const fc = D.forecasts[region];
+  $('badges').innerHTML =
+    `<span class="badge">Stage: <b>${fc.current_stage}</b></span>`+
+    `<span class="badge">Season observed: <b>${Math.round(fc.season_coverage*100)}%</b></span>`+
+    `<span class="badge">Weather: <b>${fc.weather_source}</b></span>`+
+    `<span class="badge">Planted: <b>${fc.planting_date}</b> · MG <b>${fc.maturity_group}</b></span>`;
+}
+
+function tile(label,swatch,v,unit,sub){
+  return `<div class="tile"><div class="l">${swatch?`<span class="sw" style="background:${swatch}"></span>`:''}${label}</div>
+  <div class="v">${v} <small>${unit}</small></div><div class="r">${sub||''}</div></div>`;
+}
+
+function renderTiles(){
+  const p = D.forecasts[region].predictions, fc = D.forecasts[region];
+  $('tiles').innerHTML =
+    tile('Yield','var(--s1)',fmt(p.yield_bu_ac.value),'bu/ac',`90%: ${fmt(p.yield_bu_ac.lo90)} – ${fmt(p.yield_bu_ac.hi90)}`)+
+    tile('Seed oil','var(--s2)',fmt(p.oil_pct.value,2),'%',`90%: ${fmt(p.oil_pct.lo90,2)} – ${fmt(p.oil_pct.hi90,2)}`)+
+    tile('Protein','var(--s3)',fmt(p.protein_pct.value,1),'%',`90%: ${fmt(p.protein_pct.lo90,1)} – ${fmt(p.protein_pct.hi90,1)}`)+
+    tile('Oil yield','',fmt(fc.oil_yield_lb_ac,0),'lb/ac','oil % × yield × 60 lb/bu')+
+    tile('Processing value','',fmt(fc.crush.epv_usd_ac,0),'$/ac',`$${fmt(fc.crush.epv_usd_bu,2)}/bu`);
+}
+
+const BANDS=[['planting','VE','Sown','#b7d3f6'],['VE','R1','Vegetative','#1e5c33'],
+  ['R1','R3','Flowering','#1baf7a'],['R3','R5','Pod set','#eda100'],
+  ['R5','R6','Seed fill · oil window','#d9821f'],['R6','R7','Maturing','#8a5a2b'],['R7','R8','Drydown','#6b6a64']];
+
+function renderPheno(){
+  const fc=D.forecasts[region];
+  const ds={planting:Date.parse(fc.planting_date)};
+  for(const k in fc.stage_dates) ds[k]=Date.parse(fc.stage_dates[k]);
+  const bands=BANDS.filter(b=>ds[b[0]]&&ds[b[1]]);
+  const t0=ds[bands[0][0]], t1=ds[bands[bands.length-1][1]], span=t1-t0;
+  $('pheno').innerHTML = bands.map(b=>{
+    const w=(ds[b[1]]-ds[b[0]])/span*100;
+    return `<div style="width:${w}%;background:${b[3]}" title="${b[2]}">${w>10?b[2]:''}</div>`;
+  }).join('');
+  $('phenoLeg').innerHTML = ['VE','R1','R5','R6','R7'].filter(s=>fc.stage_dates[s])
+    .map(s=>`<span><b>${s}</b> ${fc.stage_dates[s].slice(5)}</span>`).join('') +
+    `<span style="margin-left:auto">forecast as of <b>${fc.as_of}</b></span>`;
+}
+
+function renderProg(){
+  const pts=D.progression[region]; const W=520,H=210,L=44,R=10,T=12,B=26;
+  const vals=pts.flatMap(p=>[p.yield.lo90,p.yield.hi90]);
+  const lo=Math.min(...vals), hi=Math.max(...vals), pad=(hi-lo)*.1||1;
+  const y=v=>T+(H-T-B)*(1-(v-(lo-pad))/((hi+pad)-(lo-pad)));
+  const x=i=>L+(W-L-R)*i/(pts.length-1);
+  const s=svgEl(W,H);
+  for(let g=0;g<4;g++){ const gy=T+(H-T-B)*g/3;
+    add(s,'line',{x1:L,x2:W-R,y1:gy,y2:gy,stroke:'var(--grid)','stroke-width':1});
+    add(s,'text',{x:L-6,y:gy+4,'text-anchor':'end'}).textContent=fmt(lo-pad+((hi+pad)-(lo-pad))*(1-g/3),0);
+  }
+  let band='M'+pts.map((p,i)=>`${x(i)},${y(p.yield.hi90)}`).join(' L ');
+  band+=' L '+pts.slice().reverse().map((p,i)=>`${x(pts.length-1-i)},${y(p.yield.lo90)}`).join(' L ')+' Z';
+  add(s,'path',{d:band,fill:'var(--s1)',opacity:.14});
+  add(s,'path',{d:'M'+pts.map((p,i)=>`${x(i)},${y(p.yield.value)}`).join(' L '),fill:'none',stroke:'var(--s1)','stroke-width':2});
+  pts.forEach((p,i)=>{
+    add(s,'circle',{cx:x(i),cy:y(p.yield.value),r:3.2,fill:'var(--s1)'});
+    const hit=add(s,'rect',{x:x(i)-14,y:T,width:28,height:H-T-B,fill:'transparent'});
+    hit.addEventListener('mousemove',e=>showTip(e,`<b>${p.as_of}</b> · ${p.stage}<br>${fmt(p.yield.value)} bu/ac<br>90%: ${fmt(p.yield.lo90)} – ${fmt(p.yield.hi90)}`));
+    hit.addEventListener('mouseleave',hideTip);
+    if(i%2===0) add(s,'text',{x:x(i),y:H-8,'text-anchor':'middle'}).textContent=p.as_of.slice(5);
+  });
+  const last=pts[pts.length-1];
+  add(s,'text',{x:x(pts.length-1)-6,y:y(last.yield.value)-8,'text-anchor':'end',class:'em'}).textContent=fmt(last.yield.value)+' bu/ac';
+  $('prog').innerHTML=''; $('prog').appendChild(s);
+}
+
+const HIST_METRICS={yield_bu_ac:['Yield','bu/ac',1,'var(--s1)'],oil_pct:['Seed oil','%',2,'var(--s2)'],
+  oil_yield_lb_ac:['Oil yield','lb/ac',0,'var(--s2)'],epv_usd_ac:['Value','$/ac',0,'var(--s3)']};
+
+function renderHistSeg(){
+  const n=$('histSeg'); n.innerHTML='';
+  for(const k in HIST_METRICS){ const b=document.createElement('button');
+    b.textContent=HIST_METRICS[k][0]; b.className=k===histMetric?'on':'';
+    b.onclick=()=>{ histMetric=k; renderHistSeg(); renderHist(); }; n.appendChild(b); }
+}
+
+function currentMetric(fc,k){
+  if(k==='yield_bu_ac')return fc.predictions.yield_bu_ac.value;
+  if(k==='oil_pct')return fc.predictions.oil_pct.value;
+  if(k==='oil_yield_lb_ac')return fc.oil_yield_lb_ac;
+  return fc.crush.epv_usd_ac;
+}
+
+function renderHist(){
+  const h=D.history[region], fc=D.forecasts[region];
+  const [label,unit,dg,color]=HIST_METRICS[histMetric];
+  const cur=currentMetric(fc,histMetric), st=h.stats[histMetric];
+  const W=520,H=230,L=46,R=10,T=26,B=24;
+  const hi=Math.max(st.max,cur)*1.08;
+  const y=v=>T+(H-T-B)*(1-v/hi);           /* zero baseline — bars encode length */
+  const bw=(W-L-R)/h.years.length;
+  const s=svgEl(W,H);
+  for(let g=0;g<4;g++){ const gv=hi*g/3, gy=y(gv);
+    add(s,'line',{x1:L,x2:W-R,y1:gy,y2:gy,stroke:'var(--grid)'});
+    add(s,'text',{x:L-6,y:gy+4,'text-anchor':'end'}).textContent=fmt(gv,0); }
+  h.years.forEach((yr,i)=>{
+    const v=yr[histMetric], bx=L+i*bw+bw*.18;
+    const bar=add(s,'rect',{x:bx,y:y(v),width:bw*.64,height:y(0)-y(v),rx:4,fill:color,opacity:.88});
+    bar.addEventListener('mousemove',e=>showTip(e,`<b>${yr.year}</b><br>${fmt(v,dg)} ${unit}`));
+    bar.addEventListener('mouseleave',hideTip);
+    add(s,'text',{x:bx+bw*.32,y:H-8,'text-anchor':'middle'}).textContent=String(yr.year).slice(2);
+  });
+  add(s,'line',{x1:L,x2:W-R,y1:y(st.mean),y2:y(st.mean),stroke:'var(--muted)','stroke-width':1.4});
+  add(s,'line',{x1:L,x2:W-R,y1:y(cur),y2:y(cur),stroke:'var(--ink)','stroke-width':1.6,'stroke-dasharray':'5 4'});
+  add(s,'text',{x:W-R,y:y(cur)-5,'text-anchor':'end',class:'em'}).textContent=`2025 forecast ${fmt(cur,dg)}`;
+  add(s,'text',{x:W-R,y:y(st.mean)+13,'text-anchor':'end'}).textContent=`10-yr avg ${fmt(st.mean,dg)}`;
+  const d=cur-st.mean, pc=d/st.mean*100;
+  $('hist').innerHTML=`<div style="font-size:13px;margin-bottom:6px">vs. average:
+    <span class="${d>=0?'good':'crit'}">${d>=0?'+':''}${fmt(d,dg)} ${unit} (${pc>=0?'+':''}${fmt(pc,1)}%)</span></div>`;
+  $('hist').appendChild(s);
+}
+
+const FEAT={lat:'Latitude',maturity_group:'Maturity group',soil_awc_mm:'Soil water capacity',som_pct:'Soil organic matter',
+planting_doy:'Planting date',veg_gdd:'Vegetative GDD',veg_precip_mm:'Vegetative rain',veg_tmean_c:'Vegetative temp',
+veg_stress_water:'Vegetative water stress',flower_tmean_c:'Flowering temp',flower_tmax_mean_c:'Flowering max temp',
+flower_precip_mm:'Flowering rain',flower_srad_mj:'Flowering sunlight',flower_vpd_kpa:'Flowering VPD',
+flower_days_gt30:'Flowering days >30°C',flower_days_gt35:'Flowering days >35°C',flower_stress_water:'Flowering water stress',
+flower_ptq:'Flowering photothermal',fill_tmean_c:'Seed-fill temp',fill_tmin_mean_c:'Seed-fill night temp',
+fill_tmax_mean_c:'Seed-fill max temp',fill_night_warm:'Warm nights in fill',fill_precip_mm:'Seed-fill rain',
+fill_srad_mj:'Seed-fill sunlight',fill_vpd_kpa:'Seed-fill VPD',fill_days_gt30:'Seed-fill days >30°C',
+fill_days_gt35:'Seed-fill days >35°C',fill_stress_water:'Seed-fill water stress',fill_ptq:'Seed-fill photothermal',
+fill_gdd:'Seed-fill GDD',fill_length_days:'Seed-fill length',late_tmean_c:'Late-season temp',late_precip_mm:'Late rain',
+late_stress_water:'Late water stress',season_precip_mm:'Season rain',season_gdd:'Season GDD',aug_precip_mm:'August rain'};
+
+function renderDrivers(){
+  const dr=(D.forecasts[region].drivers.yield_bu_ac||[]).slice(0,7);
+  const W=520,H=7*34+18,L=180,R=44;
+  const mx=Math.max(...dr.map(d=>Math.abs(d.shap)))||1;
+  const x0=L+(W-L-R)/2, sc=(W-L-R)/2/mx;
+  const s=svgEl(W,H);
+  add(s,'line',{x1:x0,x2:x0,y1:6,y2:H-10,stroke:'var(--baseline)'});
+  dr.forEach((d,i)=>{
+    const yy=12+i*34, w=Math.abs(d.shap)*sc;
+    const bar=add(s,'rect',{x:d.shap>=0?x0:x0-w,y:yy,width:Math.max(w,1),height:15,rx:4,
+      fill:d.shap>=0?'var(--pos)':'var(--neg)'});
+    bar.addEventListener('mousemove',e=>showTip(e,`<b>${FEAT[d.feature]||d.feature}</b><br>${d.shap>0?'+':''}${fmt(d.shap,2)} bu/ac · value ${d.value}`));
+    bar.addEventListener('mouseleave',hideTip);
+    add(s,'text',{x:L-8,y:yy+12,'text-anchor':'end',class:'lbl'}).textContent=FEAT[d.feature]||d.feature;
+    add(s,'text',{x:d.shap>=0?x0+w+5:x0-w-5,y:yy+12,'text-anchor':d.shap>=0?'start':'end'})
+      .textContent=(d.shap>0?'+':'')+fmt(d.shap,1);
+  });
+  $('drivers').innerHTML=''; $('drivers').appendChild(s);
+}
+
+function renderFatty(){
+  const p=D.forecasts[region].predictions;
+  const acids=[['Linoleic',p.linoleic_pct,'var(--s1)','18:2 — polyunsaturated workhorse'],
+    ['Oleic',p.oleic_pct,'var(--s2)','18:1 — heat-stable, premium frying oil'],
+    ['Linolenic',p.linolenic_pct,'var(--s3)','18:3 — oxidation risk; lower is better']];
+  const other=100-acids.reduce((a,x)=>a+x[1].value,0);
+  let bar='<div style="display:flex;height:32px;border-radius:8px;overflow:hidden">';
+  acids.forEach(a=>{ bar+=`<div title="${a[0]} ${fmt(a[1].value)}%" style="width:${a[1].value}%;background:${a[2]};margin-right:2px;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11.5px;font-weight:700">${a[1].value>11?a[0]+' '+fmt(a[1].value,1)+'%':fmt(a[1].value,0)+'%'}</div>`; });
+  bar+=`<div style="width:${other}%;background:var(--baseline);display:flex;align-items:center;justify-content:center;font-size:11.5px;color:var(--ink)">${other>9?'Sat. '+fmt(other,0)+'%':''}</div></div>`;
+  let tbl='<table style="margin-top:12px"><tr><th>Fatty acid</th><th>Forecast</th><th>90% interval</th><th></th></tr>';
+  acids.forEach(a=>{ tbl+=`<tr><td><span class="sw" style="background:${a[2]};margin-right:7px"></span>${a[0]}</td>
+    <td>${fmt(a[1].value,1)}%</td><td>${fmt(a[1].lo90,1)} – ${fmt(a[1].hi90,1)}%</td>
+    <td style="color:var(--muted);font-size:12px">${a[3]}</td></tr>`; });
+  tbl+=`<tr><td><span class="sw" style="background:var(--baseline);margin-right:7px"></span>Saturates &amp; other</td><td>${fmt(other,1)}%</td><td>—</td><td style="color:var(--muted);font-size:12px">palmitic + stearic — largely weather-invariant</td></tr></table>`;
+  $('fatty').innerHTML=bar+tbl;
+}
+
+function renderCrush(){
+  const c=D.forecasts[region].crush;
+  $('crush').innerHTML =
+    tile('Oil recovered','',fmt(c.oil_lb_per_bu,1),'lb/bu',fmt(c.oil_lb_per_ac,0)+' lb/ac')+
+    tile('Meal produced','',fmt(c.meal_lb_per_bu,1),'lb/bu',fmt(c.meal_protein_pct,1)+'% protein basis')+
+    tile('Oil value','','$'+fmt(c.oil_value_usd_bu,2),'/bu',`quality adj ${c.oil_quality_adj_usd_lb>=0?'+':''}${fmt(c.oil_quality_adj_usd_lb,3)} $/lb`)+
+    tile('Est. processing value','','$'+fmt(c.epv_usd_bu,2),'/bu','$'+fmt(c.epv_usd_ac,0)+' /ac')+
+    `<div class="tile"><div class="l">Gross crush margin</div>
+     <div class="v ${c.gross_margin_usd_bu>=0?'good':'crit'}">$${fmt(c.gross_margin_usd_bu,2)} <small>/bu</small></div>
+     <div class="r">vs bean cost $10.60/bu</div></div>`;
+}
+
+const TGT={yield_bu_ac:['Yield','bu/ac'],oil_pct:['Seed oil','pts'],protein_pct:['Protein','pts'],
+  oleic_pct:['Oleic','pts'],linoleic_pct:['Linoleic','pts'],linolenic_pct:['Linolenic','pts']};
+
+function renderValidation(){
+  const m=D.meta;
+  $('valNote').textContent=`Trained on ${m.n_train.toLocaleString()} field-seasons, ${m.years[0]}–${m.years[1]} · training data: ${m.training_data} · every metric from fully held-out years.`;
+  let h='<tr><th>Target</th><th>RMSE</th><th>R²</th><th>Baseline RMSE</th><th>Skill</th><th>90% ±</th><th>Coverage</th></tr>';
+  for(const t in m.validation){ const v=m.validation[t], [lab,u]=TGT[t];
+    h+=`<tr><td><b>${lab}</b></td><td>${fmt(v.loyo_rmse,2)} ${u}</td><td>${fmt(v.loyo_r2,2)}</td>
+    <td>${fmt(v.baseline_trend_rmse,2)} ${u}</td><td class="${v.skill_vs_trend>0?'good':'crit'}">${fmt(v.skill_vs_trend*100,0)}%</td>
+    <td>${fmt(v.conformal_q90,2)} ${u}</td><td>${fmt(v.coverage_check*100,0)}%</td></tr>`; }
+  $('valTable').innerHTML=h;
+}
+
+function renderAll(){
+  renderRegions(); renderBadges(); renderTiles(); renderPheno();
+  renderProg(); renderHistSeg(); renderHist(); renderDrivers(); renderFatty(); renderCrush();
+}
+renderAll(); renderValidation();
+</script>

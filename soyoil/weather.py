@@ -185,12 +185,14 @@ class SeasonAnomaly:
 
 
 def sample_season_anomaly(rng: np.random.Generator) -> SeasonAnomaly:
+    # Anomalies are clipped to ~2σ so simulated seasons span dry/hot/cool/wet
+    # extremes without generating physically implausible outliers.
     return SeasonAnomaly(
-        temp_c=float(rng.normal(0.0, 0.9)),
-        precip_factor=float(np.exp(rng.normal(0.0, 0.28))),
+        temp_c=float(np.clip(rng.normal(0.0, 0.9), -1.8, 1.8)),
+        precip_factor=float(np.clip(np.exp(rng.normal(0.0, 0.28)), 0.5, 1.9)),
         srad_factor=float(np.clip(rng.normal(1.0, 0.05), 0.85, 1.15)),
-        late_heat_c=float(max(0.0, rng.normal(0.0, 1.2))),
-        aug_dry_factor=float(np.exp(rng.normal(0.0, 0.35))),
+        late_heat_c=float(min(2.5, max(0.0, rng.normal(0.0, 1.2)))),
+        aug_dry_factor=float(np.clip(np.exp(rng.normal(0.0, 0.35)), 0.45, 2.1)),
     )
 
 

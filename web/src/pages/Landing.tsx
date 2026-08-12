@@ -41,11 +41,12 @@ export default function Landing({ go }: { go: (p: Page) => void }) {
             </div>
           </div>
           <div className="stat">
-            <div className="v">100%</div>
-            <div className="l">Public data inputs</div>
+            <div className="v">Public-first</div>
+            <div className="l">Data architecture</div>
             <div className="sub">
-              NASA POWER, Open-Meteo/ERA5, USDA NASS, SSURGO soils — no
-              proprietary lock-in.
+              Built for NASA POWER, Open-Meteo/ERA5, USDA NASS, and SSURGO —
+              no proprietary lock-in. Demo runs on labeled climatology
+              simulation until the ground-truth connectors go live.
             </div>
           </div>
           <div className="stat">
