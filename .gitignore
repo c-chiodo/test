@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+node_modules/
+web/dist/
+soyoil/data/cache/
+soyoil/models/*.joblib
+soyoil/models/*.parquet
+soyoil/models/meta.json
+nohup.out
+*.log
+web/tsconfig.tsbuildinfo
