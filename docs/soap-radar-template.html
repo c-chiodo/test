@@ -1,0 +1,301 @@
+<title>Soap Radar</title>
+<style>
+  :root {
+    color-scheme: light;
+    --page:#f9f9f7; --surface:#fcfcfb; --ink:#0b0b0b; --ink2:#52514e;
+    --muted:#898781; --grid:#e1e0d9; --baseline:#c3c2b7;
+    --border:rgba(11,11,11,.1);
+    --s1:#2a78d6; --s2:#eb6834; --s3:#1baf7a;
+    --good:#006300; --crit:#d03b3b; --warnbg:rgba(250,178,25,.09); --warnbar:#fab219;
+    --leaf:#1e5c33; --oil:#d9a616;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      color-scheme: dark;
+      --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7;
+      --muted:#898781; --grid:#2c2c2a; --baseline:#383835;
+      --border:rgba(255,255,255,.1);
+      --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+      --good:#0ca30c; --crit:#e66767;
+    }
+  }
+  :root[data-theme="dark"] {
+    color-scheme: dark;
+    --page:#0d0d0d; --surface:#1a1a19; --ink:#fff; --ink2:#c3c2b7;
+    --muted:#898781; --grid:#2c2c2a; --baseline:#383835;
+    --border:rgba(255,255,255,.1);
+    --s1:#3987e5; --s2:#d95926; --s3:#199e70;
+    --good:#0ca30c; --crit:#e66767;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--page); color:var(--ink);
+    font:15px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif; -webkit-font-smoothing:antialiased; }
+  .wrap { max-width:1140px; margin:0 auto; padding:0 20px; }
+  header.top { position:sticky; top:0; z-index:30; border-bottom:1px solid var(--border);
+    background:color-mix(in srgb, var(--page) 90%, transparent); backdrop-filter:blur(8px); }
+  .top-inner { display:flex; align-items:center; gap:12px; height:54px; }
+  .logo { font-weight:800; font-size:18px; letter-spacing:-.02em; }
+  .logo span { color:var(--oil); }
+  .chip { font-size:11px; font-weight:700; letter-spacing:.07em; text-transform:uppercase;
+    padding:3px 10px; border-radius:99px; color:var(--leaf);
+    background:color-mix(in srgb, var(--leaf) 12%, transparent); }
+  .top-note { margin-left:auto; font-size:12px; color:var(--muted); }
+  .hero { padding:30px 0 8px; }
+  .hero h1 { font-size:clamp(22px,3.5vw,32px); letter-spacing:-.02em; margin:0 0 8px; text-wrap:balance; }
+  .hero p { color:var(--ink2); max-width:700px; margin:0; }
+  .tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:18px 0 14px; }
+  .tile { background:var(--surface); border:1px solid var(--border); border-radius:12px; padding:13px 15px; }
+  .tile .l { font-size:12px; color:var(--muted); }
+  .tile .v { font-size:24px; font-weight:800; letter-spacing:-.02em; font-variant-numeric:tabular-nums; }
+  .tile .v small { font-size:13px; font-weight:500; color:var(--ink2); }
+  .panel { background:var(--surface); border:1px solid var(--border); border-radius:12px;
+    padding:16px 18px; margin-bottom:14px; }
+  .panel h3 { margin:0 0 2px; font-size:15px; }
+  .panel .note { color:var(--muted); font-size:12px; margin:0 0 12px; }
+  .outlets { display:flex; flex-wrap:wrap; gap:8px 16px; }
+  .outlets label { font-size:13px; color:var(--ink2); display:flex; gap:6px; align-items:center; cursor:pointer; }
+  .outlets label.disabled { opacity:.55; cursor:default; }
+  .outlets input { accent-color:var(--leaf); }
+  svg text { font:11px system-ui,-apple-system,"Segoe UI",sans-serif; fill:var(--muted); }
+  svg .lbl { fill:var(--ink2); }
+  svg .em { fill:var(--ink); font-weight:700; }
+  .legend { display:flex; flex-wrap:wrap; gap:6px 18px; font-size:12px; color:var(--ink2); margin-top:6px; }
+  .dot { width:10px; height:10px; border-radius:50%; display:inline-block; margin-right:5px; vertical-align:-1px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th { text-align:left; color:var(--muted); font-weight:600; padding:6px 9px;
+    border-bottom:1px solid var(--grid); white-space:nowrap; }
+  td { padding:6px 9px; border-bottom:1px solid var(--grid); font-variant-numeric:tabular-nums; }
+  tr:last-child td { border-bottom:none; }
+  .tier { display:inline-block; min-width:22px; text-align:center; font-weight:800; font-size:12px;
+    border-radius:6px; padding:2px 7px; color:#fff; }
+  .tA { background:var(--s1); } .tB { background:var(--s2); } .tC { background:var(--muted); }
+  .st { font-size:11.5px; border-radius:99px; padding:2px 9px; border:1px solid var(--border);
+    color:var(--ink2); white-space:nowrap; }
+  .st.new { color:var(--good); border-color:var(--good); font-weight:600; }
+  .callout { font-size:12px; color:var(--muted); border-left:3px solid var(--warnbar);
+    background:var(--warnbg); padding:9px 13px; border-radius:0 8px 8px 0; margin:4px 0 30px; }
+  .tip { position:fixed; pointer-events:none; background:var(--surface); border:1px solid var(--border);
+    border-radius:8px; padding:7px 11px; font-size:12px; color:var(--ink); display:none; z-index:99;
+    box-shadow:0 4px 14px rgba(0,0,0,.12); font-variant-numeric:tabular-nums; max-width:260px; }
+  footer { color:var(--muted); font-size:12.5px; padding:16px 0 40px; border-top:1px solid var(--border); }
+  .scrollx { overflow-x:auto; }
+</style>
+
+<header class="top"><div class="wrap top-inner">
+  <div class="logo">Soap Radar<span>●</span></div>
+  <span class="chip">Feed Energy internal</span>
+  <span class="top-note">Crush-plant soapstock targeting · from the FE plant ledger</span>
+</div></header>
+
+<div class="wrap">
+  <section class="hero">
+    <h1>Which soap is worth going after?</h1>
+    <p>Every US/CA soybean crush plant from the ledger, scored on two axes: how much wet soap
+    is actually available after meal application, and how far the plant sits from the nearest
+    outlet that could take it instead. Big and stranded = go get it.</p>
+  </section>
+
+  <div class="tiles" id="tiles"></div>
+
+  <div class="panel">
+    <h3>Competing soap outlets</h3>
+    <p class="note">Isolation = straight-line miles to the nearest checked outlet. Toggle to test
+    scenarios — rankings and the chart update live. Two ledger shorthands ("Runion", "Pullman")
+    couldn't be placed and are excluded until their locations are confirmed.</p>
+    <div class="outlets" id="outlets"></div>
+  </div>
+
+  <div class="panel">
+    <h3>Volume × isolation</h3>
+    <p class="note">Each dot is a plant with sellable soap (dot area = wet soap production).
+    Up and to the right is the hunting ground: big volume, no nearby competing outlet.</p>
+    <div id="scatter"></div>
+    <div class="legend">
+      <span><span class="dot" style="background:var(--s1)"></span>Tier A — priority</span>
+      <span><span class="dot" style="background:var(--s2)"></span>Tier B</span>
+      <span><span class="dot" style="background:var(--muted)"></span>Tier C / small</span>
+      <span><span class="dot" style="background:var(--surface);border:2px solid var(--good)"></span>ring = already ships to FE</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>Ranked target list</h3>
+    <p class="note">Score = available M lbs × isolation (capped 600 mi) ÷ 100. Excluded from targeting:
+    100%-soap-to-meal plants, integrated acidulators, over-served plants (negative availability), idle sites.</p>
+    <div class="scrollx"><table id="tbl"></table></div>
+  </div>
+
+  <div class="panel">
+    <h3>Excluded plants — why they're off the list</h3>
+    <div class="scrollx"><table id="excl"></table></div>
+  </div>
+
+  <div class="callout"><b>Read before acting:</b> distances are straight-line, not road/rail freight;
+  outlet locations for Valley (Memphis), St. Paul, and Gold Coast (Brandon, MS) are assumed from the
+  ledger's shorthand — confirm before basing commitments on them. Volumes come straight from the FE
+  workbook's soap %, utilization, and meal-application assumptions. Update
+  <code>scripts/soap_targets.py</code> and re-run to refresh.</div>
+
+  <footer>Soap Radar · built on the Feed Energy plant ledger · straight-line isolation model v1</footer>
+</div>
+
+<div class="tip" id="tip"></div>
+<script id="data" type="application/json">__DATA__</script>
+<script>
+const D = JSON.parse(document.getElementById('data').textContent);
+const $ = id => document.getElementById(id);
+const fmt = (v,d=1) => Number(v).toLocaleString(undefined,{minimumFractionDigits:d,maximumFractionDigits:d});
+const tip = $('tip');
+function showTip(e,h){ tip.innerHTML=h; tip.style.display='block';
+  tip.style.left=Math.min(e.clientX+14, innerWidth-280)+'px'; tip.style.top=(e.clientY+12)+'px'; }
+function hideTip(){ tip.style.display='none'; }
+function svgEl(w,h){ const s=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  s.setAttribute('viewBox',`0 0 ${w} ${h}`); s.style.width='100%'; s.style.display='block'; return s; }
+function add(p,t,a){ const e=document.createElementNS('http://www.w3.org/2000/svg',t);
+  for(const k in a) e.setAttribute(k,a[k]); p.appendChild(e); return e; }
+
+// outlet state
+const on = {}; D.outlets.forEach(o=>on[o.id]=o.default_on);
+const UNKNOWN = [
+  {name:'Runion — location unknown'},
+  {name:'Pullman — location unknown'},
+];
+
+function isolation(p){
+  const act = D.outlets.filter(o=>on[o.id]);
+  if(!act.length) return 999;
+  return Math.min(...act.map(o=>p.outlet_dists[o.id]));
+}
+
+function classify(p){
+  const iso = isolation(p);
+  const note = p.note||'';
+  if(p.capacity_mbu===0 || p.soap_pct===0) return {status:'no soap production', tier:null, iso};
+  if(note.includes('announced')||note.includes('on hold')) return {status:'future plant', tier:null, iso};
+  if(p.soap_on_meal_pct>=90) return {status:'soap goes to meal', tier:null, iso};
+  if(note.includes('acidulation')) return {status:'integrated acidulator', tier:null, iso};
+  if(p.avail_after_meal_mlbs<0) return {status:'over-served', tier:null, iso};
+  const vol = p.avail_after_meal_mlbs>0?p.avail_after_meal_mlbs:p.remaining_soap_mlbs;
+  const existing = p.fe_current_mlbs>0;
+  if(vol<3) return {status: existing?'existing (small)':'small volume', tier:null, iso};
+  let tier;
+  if(vol>=10 && iso>=250) tier='A';
+  else if(vol>=8 || (vol>=4 && iso>=300)) tier='B';
+  else tier='C';
+  return {status: existing?'existing FE supplier':'new target', tier, iso,
+          vol, score:+(vol*Math.min(iso,600)/100).toFixed(1)};
+}
+
+function compute(){
+  return D.plants.map(p=>({...p, ...classify(p)}));
+}
+
+function renderTiles(rows){
+  const t = rows.filter(r=>r.tier);
+  const a = t.filter(r=>r.tier==='A');
+  const newT = t.filter(r=>r.status==='new target');
+  const vol = t.reduce((s,r)=>s+(r.vol||0),0);
+  $('tiles').innerHTML =
+    `<div class="tile"><div class="l">Plants in ledger</div><div class="v">${D.plants.length}</div></div>`+
+    `<div class="tile"><div class="l">Scored targets</div><div class="v">${t.length}</div></div>`+
+    `<div class="tile"><div class="l">Tier A priorities</div><div class="v">${a.length}</div></div>`+
+    `<div class="tile"><div class="l">New (no FE volume yet)</div><div class="v">${newT.length}</div></div>`+
+    `<div class="tile"><div class="l">Target soap pool</div><div class="v">${fmt(vol,0)} <small>M lbs/yr</small></div></div>`;
+}
+
+function renderOutlets(){
+  const n=$('outlets'); n.innerHTML='';
+  D.outlets.forEach(o=>{
+    const l=document.createElement('label');
+    const c=document.createElement('input'); c.type='checkbox'; c.checked=on[o.id];
+    c.onchange=()=>{ on[o.id]=c.checked; renderAll(); };
+    l.appendChild(c); l.append(` ${o.name}`);
+    n.appendChild(l);
+  });
+  UNKNOWN.forEach(u=>{
+    const l=document.createElement('label'); l.className='disabled';
+    const c=document.createElement('input'); c.type='checkbox'; c.disabled=true;
+    l.appendChild(c); l.append(` ${u.name}`); n.appendChild(l);
+  });
+}
+
+function renderScatter(rows){
+  const pts = rows.filter(r=>r.tier || ['existing (small)','small volume'].includes(r.status));
+  const W=1000,H=430,L=56,R=18,T=14,B=40;
+  const xmax=Math.max(...pts.map(p=>p.iso))*1.08;
+  const ymax=Math.max(...pts.map(p=>p.avail_after_meal_mlbs>0?p.avail_after_meal_mlbs:p.remaining_soap_mlbs))*1.1;
+  const x=v=>L+(W-L-R)*v/xmax, y=v=>T+(H-T-B)*(1-v/ymax);
+  const s=svgEl(W,H);
+  for(let g=0;g<5;g++){
+    const gv=ymax*g/4, gy=y(gv);
+    add(s,'line',{x1:L,x2:W-R,y1:gy,y2:gy,stroke:'var(--grid)'});
+    add(s,'text',{x:L-7,y:gy+4,'text-anchor':'end'}).textContent=fmt(gv,0);
+    const xv=xmax*g/4, gx=x(xv);
+    add(s,'line',{y1:T,y2:H-B,x1:gx,x2:gx,stroke:'var(--grid)'});
+    add(s,'text',{x:gx,y:H-B+16,'text-anchor':'middle'}).textContent=fmt(xv,0)+' mi';
+  }
+  add(s,'text',{x:L,y:H-6,class:'lbl'}).textContent='→ isolation: miles to nearest checked outlet';
+  add(s,'text',{x:12,y:T+10,class:'lbl'}).textContent='available soap (M lbs/yr)';
+  pts.sort((a,b)=>(b.wet_soap_mlbs)-(a.wet_soap_mlbs));
+  pts.forEach(p=>{
+    const vol=p.avail_after_meal_mlbs>0?p.avail_after_meal_mlbs:p.remaining_soap_mlbs;
+    const r=Math.max(4,Math.sqrt(p.wet_soap_mlbs)*1.5);
+    const col=p.tier==='A'?'var(--s1)':p.tier==='B'?'var(--s2)':'var(--muted)';
+    const c=add(s,'circle',{cx:x(p.iso),cy:y(vol),r, fill:col, 'fill-opacity':.82,
+      stroke:p.fe_current_mlbs>0?'var(--good)':'var(--surface)','stroke-width':2});
+    c.addEventListener('mousemove',e=>showTip(e,
+      `<b>${p.operator}</b> — ${p.city}, ${p.state}<br>`+
+      `${p.tier?`Tier ${p.tier} · `:''}${p.status}<br>`+
+      `avail <b>${fmt(vol)}</b> M lbs · wet soap ${fmt(p.wet_soap_mlbs)} M<br>`+
+      `isolation ${fmt(p.iso,0)} mi · to FE ${fmt(p.dist_to_fe_mi,0)} mi`+
+      (p.fe_current_mlbs>0?`<br>current FE volume ${fmt(p.fe_current_mlbs)} M lbs`:'')));
+    c.addEventListener('mouseleave',hideTip);
+  });
+  // Label Tier A points, skipping any label that would collide with one
+  // already placed (approx text box 110x14 px).
+  const placed=[];
+  pts.filter(p=>p.tier==='A')
+     .sort((a,b)=>(b.score||0)-(a.score||0))
+     .forEach(p=>{
+    const vol=p.avail_after_meal_mlbs>0?p.avail_after_meal_mlbs:p.remaining_soap_mlbs;
+    const r=Math.max(4,Math.sqrt(p.wet_soap_mlbs)*1.5);
+    const lx=x(p.iso), ly=y(vol)-r-5;
+    if(placed.some(q=>Math.abs(q[0]-lx)<115 && Math.abs(q[1]-ly)<15)) return;
+    placed.push([lx,ly]);
+    add(s,'text',{x:lx,y:ly,'text-anchor':'middle',class:'em'})
+      .textContent=`${p.city}, ${p.state}`;
+  });
+  $('scatter').innerHTML=''; $('scatter').appendChild(s);
+}
+
+function renderTable(rows){
+  const t=rows.filter(r=>r.tier).sort((a,b)=>a.tier===b.tier?b.score-a.score:a.tier<b.tier?-1:1);
+  let h='<tr><th>Tier</th><th>Score</th><th>Plant</th><th>Operator</th><th>Status</th><th>Avail M lbs</th><th>Isolation mi</th><th>To FE mi</th><th>FE vol M lbs</th><th>Note</th></tr>';
+  t.forEach(r=>{
+    h+=`<tr><td><span class="tier t${r.tier}">${r.tier}</span></td><td><b>${fmt(r.score)}</b></td>
+    <td><b>${r.city}, ${r.state}</b></td><td>${r.operator}</td>
+    <td><span class="st ${r.status==='new target'?'new':''}">${r.status}</span></td>
+    <td>${fmt(r.vol)}</td><td>${fmt(r.iso,0)}</td><td>${fmt(r.dist_to_fe_mi,0)}</td>
+    <td>${r.fe_current_mlbs>0?fmt(r.fe_current_mlbs):'—'}</td>
+    <td style="color:var(--muted);font-size:12px">${r.note||''}</td></tr>`;
+  });
+  $('tbl').innerHTML=h;
+}
+
+function renderExcluded(rows){
+  const ex=rows.filter(r=>!r.tier);
+  let h='<tr><th>Plant</th><th>Operator</th><th>Why excluded</th><th>Wet soap M lbs</th><th>Avail M lbs</th></tr>';
+  ex.forEach(r=>{
+    h+=`<tr><td>${r.city}, ${r.state}</td><td>${r.operator}</td>
+    <td><span class="st">${r.status}</span></td><td>${fmt(r.wet_soap_mlbs)}</td>
+    <td class="${r.avail_after_meal_mlbs<0?'crit':''}" style="${r.avail_after_meal_mlbs<0?'color:var(--crit)':''}">${fmt(r.avail_after_meal_mlbs)}</td></tr>`;
+  });
+  $('excl').innerHTML=h;
+}
+
+function renderAll(){
+  const rows=compute();
+  renderTiles(rows); renderScatter(rows); renderTable(rows); renderExcluded(rows);
+}
+renderOutlets(); renderAll();
+</script>

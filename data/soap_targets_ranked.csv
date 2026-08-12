@@ -1,0 +1,73 @@
+tier,score,city,state,operator,status,avail_after_meal_mlbs,remaining_soap_mlbs,wet_soap_mlbs,soap_on_meal_pct,isolation_mi,dist_to_fe_mi,fe_current_mlbs,capacity_mbu,soap_pct,note
+A,71.4,Kansas City,MO,Cargill,new,0.0,23.42,33.46,30,305.0,179.0,0.0,55.0,1.75,
+A,67.3,Chesapeake,VA,Perdue AgriBusiness,new,0.0,12.78,18.25,30,527.0,986.0,0.0,30.0,1.75,
+A,61.1,Wichita,KS,Cargill,existing,13.82,14.91,21.29,30,442.0,334.0,1.08,35.0,1.75,
+A,55.2,Goodland,KS,Scoular,new,0.0,10.65,15.21,30,518.0,452.0,0.0,25.0,1.75,
+A,52.1,Valdosta,GA,ADM,new,0.0,12.78,18.25,30,408.0,938.0,0.0,30.0,1.75,
+A,51.1,Emporia,KS,Bunge,new,0.0,12.78,18.25,30,400.0,259.0,0.0,30.0,1.75,
+A,50.7,Salisbury,MD,Perdue AgriBusiness,new,0.0,10.65,15.21,30,476.0,978.0,0.0,25.0,1.75,
+A,29.2,Spiritwood,ND,ADM-Marathon JV,existing,10.01,12.17,30.42,60,292.0,443.0,2.24,50.0,1.75,
+A,27.4,Lincoln,NE,ADM,existing,10.17,19.16,27.38,30,269.0,168.0,16.45,45.0,1.75,
+B,53.8,Fayetteville,NC,Cargill,existing,9.81,12.78,18.25,30,548.0,916.0,2.96,30.0,1.75,
+B,45.6,Aberdeen,SD,AGP,new,0.0,19.16,27.38,30,238.0,362.0,0.0,45.0,1.75,
+B,41.4,Quincy (Plant 1),IL,ADM,existing,31.63,33.46,33.46,0,131.0,162.0,2.07,55.0,1.75,
+B,38.7,Fremont,NE,ADM,new,0.0,17.03,24.34,30,227.0,149.0,0.0,40.0,1.75,
+B,35.9,Quincy (Plant 2),IL,ADM,new,0.0,27.38,27.38,0,131.0,162.0,0.0,45.0,1.75,
+B,35.9,Destrehan,LA,Bunge-Chevron JV,new,0.0,22.15,31.64,30,162.0,825.0,0.0,52.0,1.75,
+B,34.7,Mexico,MO,ADM,new,0.0,21.29,30.42,30,163.0,191.0,0.0,50.0,1.75,
+B,33.5,Cofield,NC,Perdue AgriBusiness,new,0.0,6.39,9.13,30,524.0,966.0,0.0,15.0,1.75,
+B,33.2,Sidney,OH,Cargill,existing,21.84,25.55,36.5,30,152.0,502.0,6.53,60.0,1.75,
+B,33.1,Hastings,NE,AGP,existing,9.94,14.91,21.29,30,333.0,258.0,8.24,35.0,1.75,
+B,30.3,Cairo,IL,Bunge-Chevron JV,new,0.0,22.15,31.64,30,137.0,395.0,0.0,52.0,1.75,
+B,30.2,Decatur,IN,Bunge,new,0.0,21.29,30.42,30,142.0,455.0,0.0,50.0,1.75,
+B,28.1,Guntersville,AL,Cargill,new,0.0,12.78,18.25,30,220.0,639.0,0.0,30.0,1.75,
+B,27.1,Bainbridge,PA,Perdue AgriBusiness,new,0.0,7.45,10.65,30,364.0,891.0,0.0,17.5,1.75,
+B,26.1,Decatur,AL,Bunge,existing,14.64,14.91,21.29,30,178.0,602.0,0.26,35.0,1.75,
+B,24.3,Eagle Grove,IA,AGP,existing,23.39,23.42,33.46,30,104.0,75.0,0.03,55.0,1.75,
+B,22.6,Frankfort,IN,ADM,existing,16.99,17.03,24.34,30,133.0,382.0,0.04,40.0,1.75,
+B,21.5,Claypool,IN,Louis Dreyfus Company,new,0.0,12.78,18.25,30,168.0,403.0,0.0,30.0,1.75,
+B,21.0,Manning,IA,AGP,new,0.0,12.78,18.25,30,164.0,77.0,0.0,30.0,1.75,
+B,19.9,Lafayette,IN,Cargill,new,0.0,17.03,24.34,30,117.0,361.0,0.0,40.0,1.75,
+B,18.5,St. Joseph,MO,AGP,existing,6.05,18.25,18.25,0,306.0,141.0,22.7,30.0,1.75,
+B,17.1,Sheldon,IA,AGP,new,0.0,14.91,21.29,30,115.0,158.0,0.0,35.0,1.75,
+B,16.7,Zeeland,MI,Zeeland Farm Services,new,0.0,10.65,15.21,30,157.0,398.0,0.0,25.0,1.75,
+B,15.6,Owensboro,KY,Cargill-Owensboro Grain JV,existing,8.94,12.78,18.25,30,174.0,435.0,3.83,30.0,1.75,
+B,15.3,Mt. Vernon,IN,CGB Enterprises,new,0.0,10.65,15.21,30,144.0,395.0,0.0,25.0,1.75,
+B,15.2,Sioux City,IA,Cargill,existing,9.16,38.94,55.62,30,166.0,156.0,57.57,40.0,4.0,
+B,15.0,Gainesville,GA,Cargill,existing,4.19,10.65,15.21,30,358.0,733.0,6.45,25.0,1.75,
+B,13.8,Gilman,IL,Incobrasa Industries,existing,16.85,17.03,24.34,30,82.0,298.0,0.18,40.0,1.75,
+B,13.0,Delphos,OH,Bunge,new,0.0,10.65,15.21,30,122.0,485.0,0.0,25.0,1.75,
+B,12.9,Fairmont,MN,CHS,new,0.0,30.66,43.8,30,42.0,149.0,0.0,72.0,1.75,
+B,12.6,Volga,SD,South Dakota Soybean Processors,existing,8.7,14.91,21.29,30,145.0,252.0,7.28,35.0,1.75,
+B,12.3,Stuttgart,AR,Riceland Foods,new,0.0,12.78,18.25,30,96.0,503.0,0.0,30.0,1.75,
+B,11.9,Emmetsburg,IA,AGP,new,0.0,14.91,21.29,30,80.0,118.0,0.0,35.0,1.75,
+B,10.3,Fostoria,OH,ADM,new,0.0,12.78,18.25,30,81.0,529.0,0.0,30.0,1.75,
+B,10.2,Mason City,IA,AGP,new,0.0,12.78,18.25,30,80.0,110.0,0.0,30.0,1.75,
+B,9.2,Bellevue,OH,Bunge,new,0.0,12.78,18.25,30,72.0,559.0,0.0,30.0,1.75,
+B,6.6,Bloomington,IL,Cargill,new,0.0,14.91,21.29,30,44.0,253.0,0.0,35.0,1.75,
+B,5.6,Gibson City,IL,Bunge,new,0.0,10.65,15.21,30,53.0,285.0,0.0,25.0,1.75,
+C,11.1,Seymour,IN,White River Nutrition,new,0.0,6.39,9.13,30,174.0,446.0,0.0,15.0,1.75,
+C,6.8,Ithaca,MI,Zeeland Farm Services,new,0.0,6.39,9.13,30,106.0,474.0,0.0,15.0,1.75,
+C,6.5,Creston,IA,White River Nutrition,existing,3.02,6.39,9.13,30,215.0,53.0,3.36,15.0,1.75,
+C,5.5,Sergeant Bluff,IA,AGP,existing,3.22,21.29,21.29,0,170.0,151.0,29.94,45.0,1.75,70% utilization
+C,3.2,Brewster,MN,Minnesota Soybean Processors,existing,4.03,38.94,55.62,30,80.0,173.0,59.54,40.0,4.0,
+C,0.0,Mankato (ADM),MN,ADM,existing,3.94,48.67,69.53,30,0.0,179.0,50.61,50.0,4.0,
+,0.0,Decatur (Plant 1),IL,ADM,integrated-acid,56.03,68.14,97.34,30,0.0,273.0,14.71,70.0,4.0,integrated on-site acidulation
+,0.0,Decatur (Plant 2),IL,ADM,integrated-acid,0.0,25.55,36.5,30,0.0,273.0,0.0,60.0,1.75,integrated on-site acidulation
+,0.0,Morristown,IN,Bunge,integrated-meal,0.0,0.0,15.21,100,173.0,436.0,0.0,25.0,1.75,100% soap to meal
+,0.0,Alta,IA,Platinum Crush LLC,integrated-meal,-0.07,0.0,31.29,100,122.0,114.0,0.07,40.0,2.25,100% soap to meal
+,0.0,Cedar Rapids,IA,Cargill,integrated-meal,0.0,0.0,36.5,100,191.0,105.0,0.0,60.0,1.75,100% soap to meal
+,0.0,Council Bluffs,IA,Bunge,over-served,-3.11,109.33,121.48,10,221.0,118.0,191.08,80.0,4.0,FE anchor volume
+,0.0,Des Moines,IA,ADM,over-served,-3.79,21.29,30.42,30,179.0,0.0,47.1,50.0,1.75,FE anchor volume
+,0.0,Iowa Falls,IA,Cargill,existing,1.72,29.2,41.72,30,119.0,67.0,39.8,30.0,4.0,
+,0.0,Shell Rock,IA,Shell Rock Soy Processing,integrated-meal,0.0,0.0,30.51,100,123.0,94.0,0.0,39.0,2.25,100% soap to meal
+,0.0,Cherryvale,KS,Bartlett (Savage),over-served,-3.08,24.34,34.77,30,340.0,316.0,27.41,25.0,4.0,
+,0.0,Dawson,MN,AGP,no-soap,0.0,0.0,0.0,30,114.0,261.0,0.0,40.0,0.0,no soap production
+,0.0,Mankato (CHS),MN,CHS,integrated-acid,7.1,19.16,27.38,30,0.0,179.0,14.56,45.0,1.75,integrated acidulation
+,0.0,Deerfield,MO,ADM,over-served,-14.39,10.65,15.21,30,309.0,264.0,35.72,25.0,1.75,over-served
+,0.0,David City,NE,AGP,no-soap,0.0,0.0,0.0,30,256.0,183.0,0.0,35.0,0.0,no soap production
+,0.0,Norfolk,NE,Norfolk Crush,integrated-meal,0.0,0.0,27.38,100,227.0,198.0,0.0,35.0,2.25,100% soap to meal
+,0.0,Casselton,ND,North Dakota Soybean Processors,integrated-meal,-4.31,2.59,25.86,90,239.0,408.0,6.9,42.5,1.75,90% soap to meal; over-served
+,0.0,South Charleston,OH,Louis Dreyfus Company,future,0.0,25.55,36.5,30,174.0,537.0,0.0,60.0,1.75,announced — not yet operating
+,0.0,Pemiscot County,MO,Cargill,future,0.0,26.4,37.72,30,74.0,425.0,0.0,62.0,1.75,on hold
+,0.0,Windsor,ON,ADM,integrated-acid,0.0,15.55,15.55,0,0.0,547.0,0.0,46.0,1.75,50% utilization; integrated acidulation
