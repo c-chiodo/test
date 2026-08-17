@@ -1,0 +1,9 @@
+tag,name,kind,capacity,material,design_pressure_psig,design_temp_f,insulated,spared_by,inlet_lines,outlet_lines,notes
+E-1201,Bleacher feed heater,heat_exchanger,"2.1 MMBtu/h, shell and tube","316L SS tubes, CS shell",150.0,350.0,Y,,"4""-OIL-1204-CS150; 4""-OIL-1205-CS150; 2""-ST-1207-CS300","4""-OIL-1206-CS150J; 1""-SC-1208-CS300; 1""-VE-1217-CS150",
+F-1201,Bleaching earth filter,filter,900 ft2 vertical leaf,316L SS,90.0,250.0,N,,"3""-PS-1210-CS150J","3""-OIL-1211-CS150; 3""-SL-1216-CS150",
+F-1202,Polish filter,filter,120 ft2 cartridge,316L SS,90.0,250.0,N,,"3""-OIL-1211-CS150","3""-OIL-1212-CS150",
+P-1201A,Bleacher feed pump,pump,150 gpm @ 140 ft TDH,316L SS,150.0,250.0,N,P-1201B,"6""-OIL-1202-CS150","4""-OIL-1204-CS150",
+P-1201B,"Bleacher feed pump, installed spare",pump,150 gpm @ 140 ft TDH,316L SS,150.0,250.0,N,,"6""-OIL-1203-CS150","4""-OIL-1205-CS150",
+P-1202,Bleacher discharge pump,pump,"150 gpm @ 90 ft TDH, slurry duty",316L SS,150.0,250.0,N,,"4""-PS-1209-CS150J","3""-PS-1210-CS150J",
+TK-1201,Degummed oil day tank,tank,"12,000 gal","Carbon steel, epoxy lined",15.0,200.0,Y,,"8""-OIL-1201-CS150; 1-1/2""-N2-1213-CS150","6""-OIL-1202-CS150; 6""-OIL-1203-CS150; 2""-VE-1215-CS150",
+V-1201,Bleacher,vessel,"3,000 gal, agitated, 60 mmHg abs",316L SS,50.0,250.0,Y,,"4""-OIL-1206-CS150J","4""-PS-1209-CS150J; 2""-VE-1214-CS150",Bleaching earth dosed via screw feeder on adjacent drawing

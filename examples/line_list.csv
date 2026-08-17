@@ -1,0 +1,18 @@
+line_number,size_in,service,service_description,spec,spec_description,from,from_port,to,to_port,phase,design_flow,insulated,traced,inline_components,description,notes
+"1""-SC-1208-CS300",1.0,SC,Steam condensate,CS300,"Carbon steel, ASME Class 300",E-1201,U2,OSBL-1204,,liquid,,Y,N,steam_trap; check_valve,Condensate to return header,
+"1""-VE-1217-CS150",1.0,VE,Vent,CS150,"Carbon steel, ASME Class 150",E-1201,R1,OSBL-1206,,liquid,,N,N,PSV-1203 (relief_valve),Heater tube-side thermal relief,
+"1-1/2""-N2-1213-CS150",1.5,N2,Nitrogen,CS150,"Carbon steel, ASME Class 150",OSBL-1205,,TK-1201,N3,gas,,N,N,gate_valve; PV-1203 (control_valve); check_valve,Nitrogen blanket to day tank,
+"2""-ST-1207-CS300",2.0,ST,Steam,CS300,"Carbon steel, ASME Class 300",OSBL-1203,,E-1201,U1,steam,,Y,N,gate_valve; TV-1202 (control_valve),LP steam to feed heater,
+"2""-VE-1214-CS150",2.0,VE,Vent,CS150,"Carbon steel, ASME Class 150",V-1201,N3,OSBL-1206,,vapor,,N,N,PSV-1201 (relief_valve),Bleacher relief to vent header,
+"2""-VE-1215-CS150",2.0,VE,Vent,CS150,"Carbon steel, ASME Class 150",TK-1201,N4,OSBL-1206,,vapor,,N,N,PSV-1202 (relief_valve),Day tank relief and vent,
+"3""-OIL-1211-CS150",3.0,OIL,Crude / refined oil,CS150,"Carbon steel, ASME Class 150",F-1201,N2,F-1202,N1,liquid,,Y,N,gate_valve,Filtered oil to polish filter,
+"3""-OIL-1212-CS150",3.0,OIL,Crude / refined oil,CS150,"Carbon steel, ASME Class 150",F-1202,N2,OSBL-1202,,liquid,,Y,N,gate_valve; sample_point,Bleached oil to deodoriser,
+"3""-PS-1210-CS150J",3.0,PS,Process slurry,CS150J,"Carbon steel, Class 150, steam jacketed",P-1202,discharge,F-1201,N1,slurry,,Y,Y,check_valve; gate_valve; LV-1204 (control_valve),Slurry to bleaching earth filter,
+"3""-SL-1216-CS150",3.0,SL,Sludge,CS150,"Carbon steel, ASME Class 150",F-1201,N3,OSBL-1207,,solid,,N,N,gate_valve,Spent bleaching earth to disposal bin,
+"4""-OIL-1204-CS150",4.0,OIL,Crude / refined oil,CS150,"Carbon steel, ASME Class 150",P-1201A,discharge,E-1201,P1,liquid,150 gpm,Y,N,check_valve; gate_valve; FE-1201 (orifice); FV-1201 (control_valve),Feed pump A discharge to heater,
+"4""-OIL-1205-CS150",4.0,OIL,Crude / refined oil,CS150,"Carbon steel, ASME Class 150",P-1201B,discharge,E-1201,P1,liquid,,Y,N,check_valve; gate_valve,Feed pump B discharge to heater,
+"4""-OIL-1206-CS150J",4.0,OIL,Crude / refined oil,CS150J,"Carbon steel, Class 150, steam jacketed",E-1201,P2,V-1201,N1,liquid,150 gpm at 220 degF,Y,Y,,Heated oil to bleacher,
+"4""-PS-1209-CS150J",4.0,PS,Process slurry,CS150J,"Carbon steel, Class 150, steam jacketed",V-1201,N2,P-1202,suction,slurry,,Y,Y,gate_valve,Bleacher slurry to discharge pump,"Slope 1:100 to pump, no pockets"
+"6""-OIL-1202-CS150",6.0,OIL,Crude / refined oil,CS150,"Carbon steel, ASME Class 150",TK-1201,N2,P-1201A,suction,liquid,,Y,N,gate_valve; strainer,Day tank to feed pump A suction,
+"6""-OIL-1203-CS150",6.0,OIL,Crude / refined oil,CS150,"Carbon steel, ASME Class 150",TK-1201,N2,P-1201B,suction,liquid,,Y,N,gate_valve; strainer,Day tank to feed pump B suction,
+"8""-OIL-1201-CS150",8.0,OIL,Crude / refined oil,CS150,"Carbon steel, ASME Class 150",OSBL-1201,,TK-1201,N1,liquid,,N,N,gate_valve,Degummed oil to day tank,

@@ -1,0 +1,4 @@
+tag,type,on_line,protects,set_pressure_psig,equipment_design_pressure_psig,discharges_to,notes
+PSV-1201,relief_valve,"2""-VE-1214-CS150",V-1201,45.0,50.0,OSBL-1206,"Blocked-outlet case, 2 in x 3 in, set below the 50 psig MAWP"
+PSV-1202,relief_valve,"2""-VE-1215-CS150",TK-1201,12.0,15.0,OSBL-1206,Nitrogen regulator failure case
+PSV-1203,relief_valve,"1""-VE-1217-CS150",E-1201,140.0,150.0,OSBL-1206,Tube side blocked in against LP steam; thermal expansion case

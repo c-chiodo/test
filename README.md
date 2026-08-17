@@ -53,10 +53,34 @@ soyoil/               core science + ML package
   processing.py       crush economics (oil/meal per bu, EPV, quality premiums)
 api/main.py           FastAPI app (OpenAPI docs at /docs)
 web/                  React + Vite + Recharts app (marketing + dashboard)
-tests/                29 tests incl. model credibility gates
+pid/                  agentic P&ID builder (separate tool — see docs/PID_BUILDER.md)
+tests/                model credibility gates + P&ID builder suite
 research/             three deep research briefs (agronomy, data sources, ML design)
 docs/MODEL_CARD.md    validation, limitations, and what we must not claim
+docs/PID_BUILDER.md   the P&ID builder: agents, rules, and what it does not check
 ```
+
+## Also in this repo: the P&ID builder
+
+`pid/` is a separate tool that shares the plant-engineering side of the same
+domain. Describe a process in prose and it produces a piping and instrumentation
+diagram, the schedules that go with it (line list, instrument index, loop and
+relief schedules), and a list of everything the drawing still gets wrong.
+
+```bash
+pip install -e ".[pid]"
+pid example --out /tmp/demo                        # worked drawing, no API call
+pid build "Degummed oil is pumped from a day tank, heated against LP steam,
+contacted with bleaching earth under vacuum, then filtered." --area 1200
+```
+
+Four agents build the drawing — layout, instrumentation, safeguarding, then a
+review pass — and a deterministic rule engine checks the result against ISA-5.1
+tagging and process-safety conventions. Everything after the last API call is
+ordinary code, so `pid validate`, `pid render` and `pid export` are free and
+reproducible. It produces a drawing for engineers to review; it is not a
+substitute for a HAZOP or a P.E. stamp. Details in
+[docs/PID_BUILDER.md](docs/PID_BUILDER.md).
 
 ## API surface
 

@@ -1,0 +1,208 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="2066" height="919" viewBox="0 0 2066 919" role="img" aria-label="Oil Bleaching Unit piping and instrumentation diagram">
+<defs><style>
+  .sheet { fill: #ffffff; }
+  .sym { fill: none; stroke: #14161a; stroke-width: 1.8; }
+  .sym-thin { fill: none; stroke: #14161a; stroke-width: 1.1; }
+  .sym-fill { fill: #14161a; stroke: #14161a; stroke-width: 1.2; }
+  .sym-fill-bg { fill: #ffffff; stroke: #14161a; stroke-width: 1.8; }
+  .sym-dashed { fill: none; stroke: #14161a; stroke-width: 1.6; stroke-dasharray: 5 3; }
+  .process-line { fill: none; stroke: #14161a; stroke-width: 2.2; stroke-linejoin: miter; }
+  .utility-line { fill: none; stroke: #14161a; stroke-width: 1.3; stroke-linejoin: miter; }
+  .signal-line { fill: none; stroke: #14161a; stroke-width: 1.0; stroke-dasharray: 6 3; }
+  .loop-link { fill: none; stroke: #5b6470; stroke-width: 1.0; stroke-dasharray: 2 3; }
+  .frame { fill: none; stroke: #14161a; stroke-width: 1.6; }
+  .rule { stroke: #14161a; stroke-width: 1.0; }
+  text { font-family: "Helvetica Neue", Helvetica, Arial, sans-serif; fill: #14161a; }
+  .tag { font-size: 11.5px; font-weight: 700; letter-spacing: 0.02em; }
+  .name { font-size: 9.5px; }
+  .line-label { font-size: 8.8px; }
+  .bubble-letters { font-size: 9.5px; font-weight: 700; }
+  .bubble-letters-sm { font-size: 7.6px; font-weight: 700; letter-spacing: -0.02em; }
+  .bubble-number { font-size: 9px; }
+  .inline-tag { font-size: 8px; }
+  .title-major { font-size: 15px; font-weight: 700; }
+  .title-minor { font-size: 9.5px; }
+  .note { font-size: 9px; }
+  .legend-head { font-size: 10px; font-weight: 700; letter-spacing: 0.06em; }
+</style>
+  <marker id="flow-arrow" viewBox="0 0 10 8" refX="9" refY="4"
+          markerWidth="8" markerHeight="7" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 4 L 0 8 z" fill="#14161a"/>
+  </marker>
+</defs>
+<rect width="2066" height="919" class="sheet"/>
+<rect x="10" y="10" width="2046" height="899" class="frame"/>
+<g transform="translate(0.0,66.8)">
+<polyline points="188.0,261.0 254.0,261.0 254.0,198.0 320.0,198.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="438.0,198.0 504.0,198.0 504.0,248.0 570.0,248.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="438.0,234.0 504.0,234.0 504.0,386.0 570.0,386.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="638.0,248.0 704.0,248.0 704.0,218.0 770.0,218.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="638.0,386.0 704.0,386.0 704.0,244.0 770.0,244.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="894.0,218.0 960.0,218.0 960.0,214.0 1026.0,214.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="188.0,399.0 479.0,399.0 479.0,270.0 770.0,270.0" class="utility-line" marker-end="url(#flow-arrow)"/>
+<polyline points="894.0,244.0 1386.0,244.0 1386.0,399.0 1878.0,399.0" class="utility-line" marker-end="url(#flow-arrow)"/>
+<polyline points="1110.0,158.0 1176.0,158.0 1176.0,248.0 1242.0,248.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="1310.0,248.0 1376.0,248.0 1376.0,228.0 1442.0,228.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="1528.0,186.0 1594.0,186.0 1594.0,228.0 1660.0,228.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="1746.0,228.0 1812.0,228.0 1812.0,261.0 1878.0,261.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="188.0,511.0 254.0,511.0 254.0,270.0 320.0,270.0" class="utility-line" marker-end="url(#flow-arrow)"/>
+<polyline points="1110.0,270.0 1494.0,270.0 1494.0,496.0 1878.0,496.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="438.0,270.0 1158.0,270.0 1158.0,511.0 1878.0,511.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="894.0,270.0 1386.0,270.0 1386.0,526.0 1878.0,526.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<polyline points="1528.0,270.0 1703.0,270.0 1703.0,623.0 1878.0,623.0" class="process-line" marker-end="url(#flow-arrow)"/>
+<g transform="translate(254.0,229.5) rotate(-90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(498.1,198.0) rotate(0.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(509.9,248.0) rotate(0.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym-thin"/><path d="M -9.0 9.0 L 0 18.0 L 9.0 9.0" class="sym-thin" fill="none"/></g>
+<g transform="translate(504.0,261.7) rotate(90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(504.0,358.3) rotate(90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym-thin"/><path d="M -9.0 9.0 L 0 18.0 L 9.0 9.0" class="sym-thin" fill="none"/></g>
+<g transform="translate(677.7,248.0) rotate(0.0)"><line x1="-9.0" y1="-9.0" x2="-9.0" y2="9.0" class="sym"/><path d="M -9.0 -9.0 L 9.0 0 L -9.0 9.0 Z" class="sym-fill"/></g>
+<g transform="translate(704.0,246.8) rotate(-90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(704.0,219.2) rotate(-90.0)"><line x1="0.0" y1="-12.0" x2="0.0" y2="-3.0" class="sym"/><line x1="0.0" y1="3.0" x2="0.0" y2="12.0" class="sym"/></g>
+<text x="746.6" y="238.2" class="inline-tag" text-anchor="middle">FE-1201</text>
+<g transform="translate(730.3,218.0) rotate(0.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-19.0" class="sym"/><path d="M -11 -19.0 A 11 8 0 0 1 11 -19.0 Z" class="sym"/></g>
+<text x="763.4" y="187.0" class="inline-tag" text-anchor="middle">FV-1201</text>
+<g transform="translate(704.0,361.6) rotate(-90.0)"><line x1="-9.0" y1="-9.0" x2="-9.0" y2="9.0" class="sym"/><path d="M -9.0 -9.0 L 9.0 0 L -9.0 9.0 Z" class="sym-fill"/></g>
+<g transform="translate(704.0,268.4) rotate(-90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(422.6,399.0) rotate(0.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(535.4,270.0) rotate(0.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-19.0" class="sym"/><path d="M -11 -19.0 A 11 8 0 0 1 11 -19.0 Z" class="sym"/></g>
+<text x="535.4" y="303.0" class="inline-tag" text-anchor="middle">TV-1202</text>
+<g transform="translate(1269.9,244.0) rotate(0.0)"><circle cx="0.0" cy="0.0" r="8.0" class="sym"/><circle cx="0.0" cy="0.0" r="3.5" class="sym-fill"/></g>
+<g transform="translate(1502.1,399.0) rotate(0.0)"><line x1="-9.0" y1="-9.0" x2="-9.0" y2="9.0" class="sym"/><path d="M -9.0 -9.0 L 9.0 0 L -9.0 9.0 Z" class="sym-fill"/></g>
+<g transform="translate(1176.0,203.0) rotate(90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(1351.5,248.0) rotate(0.0)"><line x1="-9.0" y1="-9.0" x2="-9.0" y2="9.0" class="sym"/><path d="M -9.0 -9.0 L 9.0 0 L -9.0 9.0 Z" class="sym-fill"/></g>
+<g transform="translate(1376.0,238.0) rotate(-90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(1400.5,228.0) rotate(0.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-19.0" class="sym"/><path d="M -11 -19.0 A 11 8 0 0 1 11 -19.0 Z" class="sym"/></g>
+<text x="1367.3" y="197.0" class="inline-tag" text-anchor="middle">LV-1204</text>
+<g transform="translate(1594.0,207.0) rotate(90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(1800.5,228.0) rotate(0.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(1823.5,261.0) rotate(0.0)"><line x1="0.0" y1="0.0" x2="0.0" y2="19.0" class="sym"/><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym-thin"/></g>
+<g transform="translate(254.0,475.0) rotate(-90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(254.0,390.5) rotate(-90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-19.0" class="sym"/><path d="M -11 -19.0 A 11 8 0 0 1 11 -19.0 Z" class="sym"/></g>
+<text x="296.6" y="409.5" class="inline-tag" text-anchor="middle">PV-1203</text>
+<g transform="translate(254.0,306.0) rotate(-90.0)"><line x1="-9.0" y1="-9.0" x2="-9.0" y2="9.0" class="sym"/><path d="M -9.0 -9.0 L 9.0 0 L -9.0 9.0 Z" class="sym-fill"/></g>
+<g transform="translate(1494.0,383.0) rotate(0.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-21.0" class="sym"/><path d="M -7 -21.0 l 14 -4 l -14 -4 l 14 -4" class="sym-thin" fill="none"/></g>
+<text x="1538.6" y="386.0" class="inline-tag" text-anchor="middle">PSV-1201</text>
+<g transform="translate(1158.0,390.5) rotate(0.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-21.0" class="sym"/><path d="M -7 -21.0 l 14 -4 l -14 -4 l 14 -4" class="sym-thin" fill="none"/></g>
+<text x="1202.6" y="409.5" class="inline-tag" text-anchor="middle">PSV-1202</text>
+<g transform="translate(1386.0,398.0) rotate(0.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-21.0" class="sym"/><path d="M -7 -21.0 l 14 -4 l -14 -4 l 14 -4" class="sym-thin" fill="none"/></g>
+<text x="1430.6" y="417.0" class="inline-tag" text-anchor="middle">PSV-1203</text>
+<g transform="translate(1703.0,446.5) rotate(90.0)"><path d="M -9.0 -9.0 L -9.0 9.0 L 9.0 -9.0 L 9.0 9.0 Z" class="sym"/><line x1="0.0" y1="-9.0" x2="0.0" y2="-16.0" class="sym"/><line x1="-6.0" y1="-16.0" x2="6.0" y2="-16.0" class="sym"/></g>
+<g transform="translate(124.0,261.0)"><path d="M -64.0 -19.0 L 50.0 -19.0 L 64.0 0 L 50.0 19.0 L -64.0 19.0 Z" class="sym"/></g>
+<text x="117.0" y="259.0" class="name" text-anchor="middle">From degummed oil</text>
+<text x="117.0" y="269.0" class="name" text-anchor="middle">storage</text>
+<text x="124.0" y="294.0" class="tag" text-anchor="middle">OSBL-1201</text>
+<g transform="translate(1942.0,261.0)"><path d="M -64.0 -19.0 L 50.0 -19.0 L 64.0 0 L 50.0 19.0 L -64.0 19.0 Z" class="sym"/></g>
+<text x="1935.0" y="264.0" class="name" text-anchor="middle">To deodoriser</text>
+<text x="1942.0" y="294.0" class="tag" text-anchor="middle">OSBL-1202</text>
+<g transform="translate(124.0,399.0)"><path d="M -64.0 -19.0 L 50.0 -19.0 L 64.0 0 L 50.0 19.0 L -64.0 19.0 Z" class="sym"/></g>
+<text x="117.0" y="402.0" class="name" text-anchor="middle">LP steam supply</text>
+<text x="124.0" y="432.0" class="tag" text-anchor="middle">OSBL-1203</text>
+<g transform="translate(1942.0,399.0)"><path d="M -64.0 -19.0 L 50.0 -19.0 L 64.0 0 L 50.0 19.0 L -64.0 19.0 Z" class="sym"/></g>
+<text x="1935.0" y="402.0" class="name" text-anchor="middle">Condensate return</text>
+<text x="1942.0" y="432.0" class="tag" text-anchor="middle">OSBL-1204</text>
+<g transform="translate(124.0,511.0)"><path d="M -64.0 -19.0 L 50.0 -19.0 L 64.0 0 L 50.0 19.0 L -64.0 19.0 Z" class="sym"/></g>
+<text x="117.0" y="514.0" class="name" text-anchor="middle">Nitrogen supply</text>
+<text x="124.0" y="544.0" class="tag" text-anchor="middle">OSBL-1205</text>
+<g transform="translate(1942.0,511.0)"><path d="M -64.0 -19.0 L 50.0 -19.0 L 64.0 0 L 50.0 19.0 L -64.0 19.0 Z" class="sym"/></g>
+<text x="1935.0" y="514.0" class="name" text-anchor="middle">To vent header</text>
+<text x="1942.0" y="544.0" class="tag" text-anchor="middle">OSBL-1206</text>
+<g transform="translate(1942.0,623.0)"><path d="M -64.0 -19.0 L 50.0 -19.0 L 64.0 0 L 50.0 19.0 L -64.0 19.0 Z" class="sym"/></g>
+<text x="1935.0" y="621.0" class="name" text-anchor="middle">Spent earth to</text>
+<text x="1935.0" y="631.0" class="name" text-anchor="middle">disposal</text>
+<text x="1942.0" y="656.0" class="tag" text-anchor="middle">OSBL-1207</text>
+<g transform="translate(379.0,234.0)"><path d="M -59.0 -46.0 L 59.0 -46.0 L 59.0 36.0 Q 0 54.0 -59.0 36.0 Z" class="sym"/></g>
+<text x="379.0" y="295.0" class="tag" text-anchor="middle">TK-1201</text>
+<text x="379.0" y="307.0" class="name" text-anchor="middle">Degummed oil day tank</text>
+<g transform="translate(604.0,248.0)"><circle cx="0.0" cy="0.0" r="22.0" class="sym"/><path d="M 15.4 -15.4 L 34.0 -28.0 L 34.0 -16.0 Z" class="sym-fill"/><line x1="-26.0" y1="28.0" x2="26.0" y2="28.0" class="sym"/></g>
+<text x="604.0" y="295.0" class="tag" text-anchor="middle">P-1201A</text>
+<text x="604.0" y="307.0" class="name" text-anchor="middle">Bleacher feed pump</text>
+<g transform="translate(604.0,386.0)"><circle cx="0.0" cy="0.0" r="22.0" class="sym"/><path d="M 15.4 -15.4 L 34.0 -28.0 L 34.0 -16.0 Z" class="sym-fill"/><line x1="-26.0" y1="28.0" x2="26.0" y2="28.0" class="sym"/></g>
+<text x="604.0" y="433.0" class="tag" text-anchor="middle">P-1201B</text>
+<text x="604.0" y="445.0" class="name" text-anchor="middle">Bleacher feed pump,</text>
+<text x="604.0" y="456.0" class="name" text-anchor="middle">installed spare</text>
+<g transform="translate(832.0,244.0)"><rect x="-62.0" y="-36.0" width="124.0" height="72.0" rx="4.0" class="sym"/><path d="M -62.0 -16 L 44.0 -16 A 16 16 0 0 1 44.0 16 L -62.0 16" class="sym-thin" fill="none"/><line x1="-48.0" y1="-36.0" x2="-48.0" y2="36.0" class="sym-thin"/></g>
+<text x="832.0" y="295.0" class="tag" text-anchor="middle">E-1201</text>
+<text x="832.0" y="307.0" class="name" text-anchor="middle">Bleacher feed heater</text>
+<g transform="translate(1068.0,214.0)"><path d="M -42.0 -50.0 A 42.0 16 0 0 1 42.0 -50.0 L 42.0 50.0 A 42.0 16 0 0 1 -42.0 50.0 Z" class="sym"/></g>
+<text x="1068.0" y="295.0" class="tag" text-anchor="middle">V-1201</text>
+<text x="1068.0" y="307.0" class="name" text-anchor="middle">Bleacher</text>
+<g transform="translate(1276.0,248.0)"><circle cx="0.0" cy="0.0" r="22.0" class="sym"/><path d="M 15.4 -15.4 L 34.0 -28.0 L 34.0 -16.0 Z" class="sym-fill"/><line x1="-26.0" y1="28.0" x2="26.0" y2="28.0" class="sym"/></g>
+<text x="1276.0" y="295.0" class="tag" text-anchor="middle">P-1202</text>
+<text x="1276.0" y="307.0" class="name" text-anchor="middle">Bleacher discharge pump</text>
+<g transform="translate(1485.0,228.0)"><rect x="-43.0" y="-52.0" width="86.0" height="104.0" rx="4.0" class="sym"/><line x1="-32.0" y1="-42.0" x2="-32.0" y2="42.0" class="sym-thin"/><line x1="-16.0" y1="-42.0" x2="-16.0" y2="42.0" class="sym-thin"/><line x1="0.0" y1="-42.0" x2="0.0" y2="42.0" class="sym-thin"/><line x1="16.0" y1="-42.0" x2="16.0" y2="42.0" class="sym-thin"/><line x1="32.0" y1="-42.0" x2="32.0" y2="42.0" class="sym-thin"/><line x1="-43.0" y1="-42.0" x2="43.0" y2="-42.0" class="sym-thin"/><line x1="-43.0" y1="42.0" x2="43.0" y2="42.0" class="sym-thin"/></g>
+<text x="1485.0" y="295.0" class="tag" text-anchor="middle">F-1201</text>
+<text x="1485.0" y="307.0" class="name" text-anchor="middle">Bleaching earth filter</text>
+<g transform="translate(1703.0,228.0)"><rect x="-43.0" y="-52.0" width="86.0" height="104.0" rx="4.0" class="sym"/><line x1="-32.0" y1="-42.0" x2="-32.0" y2="42.0" class="sym-thin"/><line x1="-16.0" y1="-42.0" x2="-16.0" y2="42.0" class="sym-thin"/><line x1="0.0" y1="-42.0" x2="0.0" y2="42.0" class="sym-thin"/><line x1="16.0" y1="-42.0" x2="16.0" y2="42.0" class="sym-thin"/><line x1="32.0" y1="-42.0" x2="32.0" y2="42.0" class="sym-thin"/><line x1="-43.0" y1="-42.0" x2="43.0" y2="-42.0" class="sym-thin"/><line x1="-43.0" y1="42.0" x2="43.0" y2="42.0" class="sym-thin"/></g>
+<text x="1703.0" y="295.0" class="tag" text-anchor="middle">F-1202</text>
+<text x="1703.0" y="307.0" class="name" text-anchor="middle">Polish filter</text>
+<line x1="337.0" y1="157.5" x2="379.0" y2="188.0" class="signal-line"/><g transform="translate(337.0,157.5)"><circle cx="0.0" cy="0.0" r="16.5" class="sym"/></g><text x="337.0" y="156.5" class="bubble-letters" text-anchor="middle">PT</text><text x="337.0" y="167.5" class="bubble-number" text-anchor="middle">1203</text>
+<line x1="379.0" y1="157.5" x2="379.0" y2="188.0" class="signal-line"/><g transform="translate(379.0,157.5)"><rect x="-16.5" y="-16.5" width="33.0" height="33.0" rx="0.0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="16.5" class="sym"/><line x1="-16.5" y1="0.0" x2="16.5" y2="0.0" class="sym-thin"/></g><text x="379.0" y="156.5" class="bubble-letters" text-anchor="middle">PIC</text><text x="379.0" y="167.5" class="bubble-number" text-anchor="middle">1203</text>
+<line x1="421.0" y1="157.5" x2="379.0" y2="188.0" class="signal-line"/><g transform="translate(421.0,157.5)"><rect x="-16.5" y="-16.5" width="33.0" height="33.0" rx="0.0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="16.5" class="sym"/><line x1="-16.5" y1="0.0" x2="16.5" y2="0.0" class="sym-thin"/></g><text x="421.0" y="156.5" class="bubble-letters" text-anchor="middle">LT</text><text x="421.0" y="167.5" class="bubble-number" text-anchor="middle">1205</text>
+<line x1="337.0" y1="113.5" x2="379.0" y2="188.0" class="signal-line"/><g transform="translate(337.0,113.5)"><polygon points="0,-22.3 22.3,0 0,22.3 -22.3,0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="13.2" class="sym"/></g><text x="337.0" y="112.5" class="bubble-letters-sm" text-anchor="middle">LSLL</text><text x="337.0" y="123.5" class="bubble-number" text-anchor="middle">1206</text>
+<line x1="1026.0" y1="117.5" x2="1068.0" y2="148.0" class="signal-line"/><g transform="translate(1026.0,117.5)"><circle cx="0.0" cy="0.0" r="16.5" class="sym"/></g><text x="1026.0" y="116.5" class="bubble-letters" text-anchor="middle">LT</text><text x="1026.0" y="127.5" class="bubble-number" text-anchor="middle">1204</text>
+<line x1="1068.0" y1="117.5" x2="1068.0" y2="148.0" class="signal-line"/><g transform="translate(1068.0,117.5)"><rect x="-16.5" y="-16.5" width="33.0" height="33.0" rx="0.0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="16.5" class="sym"/><line x1="-16.5" y1="0.0" x2="16.5" y2="0.0" class="sym-thin"/></g><text x="1068.0" y="116.5" class="bubble-letters" text-anchor="middle">LIC</text><text x="1068.0" y="127.5" class="bubble-number" text-anchor="middle">1204</text>
+<line x1="1110.0" y1="117.5" x2="1068.0" y2="148.0" class="signal-line"/><g transform="translate(1110.0,117.5)"><circle cx="0.0" cy="0.0" r="16.5" class="sym"/></g><text x="1110.0" y="116.5" class="bubble-letters" text-anchor="middle">PI</text><text x="1110.0" y="127.5" class="bubble-number" text-anchor="middle">1209</text>
+<line x1="1026.0" y1="73.5" x2="1068.0" y2="148.0" class="signal-line"/><g transform="translate(1026.0,73.5)"><rect x="-16.5" y="-16.5" width="33.0" height="33.0" rx="0.0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="16.5" class="sym"/><line x1="-16.5" y1="0.0" x2="16.5" y2="0.0" class="sym-thin"/></g><text x="1026.0" y="72.5" class="bubble-letters" text-anchor="middle">TI</text><text x="1026.0" y="83.5" class="bubble-number" text-anchor="middle">1210</text>
+<line x1="1110.0" y1="73.5" x2="1068.0" y2="148.0" class="signal-line"/><g transform="translate(1110.0,73.5)"><polygon points="0,-22.3 22.3,0 0,22.3 -22.3,0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="13.2" class="sym"/></g><text x="1110.0" y="72.5" class="bubble-letters" text-anchor="middle">PSH</text><text x="1110.0" y="83.5" class="bubble-number" text-anchor="middle">1214</text>
+<line x1="1443.0" y1="145.5" x2="1485.0" y2="176.0" class="signal-line"/><g transform="translate(1443.0,145.5)"><rect x="-16.5" y="-16.5" width="33.0" height="33.0" rx="0.0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="16.5" class="sym"/><line x1="-16.5" y1="0.0" x2="16.5" y2="0.0" class="sym-thin"/></g><text x="1443.0" y="144.5" class="bubble-letters" text-anchor="middle">PDI</text><text x="1443.0" y="155.5" class="bubble-number" text-anchor="middle">1211</text>
+<line x1="686.6" y1="153.5" x2="686.6" y2="248.0" class="signal-line"/><g transform="translate(686.6,153.5)"><circle cx="0.0" cy="0.0" r="16.5" class="sym"/></g><text x="686.6" y="152.5" class="bubble-letters" text-anchor="middle">FT</text><text x="686.6" y="163.5" class="bubble-number" text-anchor="middle">1201</text>
+<line x1="704.0" y1="94.5" x2="704.0" y2="233.0" class="signal-line"/><g transform="translate(704.0,94.5)"><rect x="-16.5" y="-16.5" width="33.0" height="33.0" rx="0.0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="16.5" class="sym"/><line x1="-16.5" y1="0.0" x2="16.5" y2="0.0" class="sym-thin"/></g><text x="704.0" y="93.5" class="bubble-letters" text-anchor="middle">FIC</text><text x="704.0" y="104.5" class="bubble-number" text-anchor="middle">1201</text>
+<line x1="721.4" y1="35.5" x2="721.4" y2="218.0" class="signal-line"/><g transform="translate(721.4,35.5)"><circle cx="0.0" cy="0.0" r="16.5" class="sym"/></g><text x="721.4" y="34.5" class="bubble-letters" text-anchor="middle">PI</text><text x="721.4" y="45.5" class="bubble-number" text-anchor="middle">1207</text>
+<line x1="746.0" y1="132.5" x2="704.0" y2="315.0" class="signal-line"/><g transform="translate(746.0,132.5)"><circle cx="0.0" cy="0.0" r="16.5" class="sym"/></g><text x="746.0" y="131.5" class="bubble-letters" text-anchor="middle">PI</text><text x="746.0" y="142.5" class="bubble-number" text-anchor="middle">1208</text>
+<line x1="931.4" y1="167.5" x2="931.4" y2="218.0" class="signal-line"/><g transform="translate(931.4,167.5)"><circle cx="0.0" cy="0.0" r="16.5" class="sym"/></g><text x="931.4" y="166.5" class="bubble-letters" text-anchor="middle">TE</text><text x="931.4" y="177.5" class="bubble-number" text-anchor="middle">1202</text>
+<line x1="951.8" y1="123.5" x2="951.8" y2="218.0" class="signal-line"/><g transform="translate(951.8,123.5)"><circle cx="0.0" cy="0.0" r="16.5" class="sym"/></g><text x="951.8" y="122.5" class="bubble-letters" text-anchor="middle">TT</text><text x="951.8" y="133.5" class="bubble-number" text-anchor="middle">1202</text>
+<line x1="968.2" y1="75.5" x2="968.2" y2="214.0" class="signal-line"/><g transform="translate(968.2,75.5)"><rect x="-16.5" y="-16.5" width="33.0" height="33.0" rx="0.0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="16.5" class="sym"/><line x1="-16.5" y1="0.0" x2="16.5" y2="0.0" class="sym-thin"/></g><text x="968.2" y="74.5" class="bubble-letters" text-anchor="middle">TIC</text><text x="968.2" y="85.5" class="bubble-number" text-anchor="middle">1202</text>
+<line x1="988.6" y1="-12.5" x2="988.6" y2="214.0" class="signal-line"/><g transform="translate(988.6,-12.5)"><polygon points="0,-22.3 22.3,0 0,22.3 -22.3,0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="13.2" class="sym"/></g><text x="988.6" y="-13.5" class="bubble-letters" text-anchor="middle">TSH</text><text x="988.6" y="-2.5" class="bubble-number" text-anchor="middle">1213</text>
+<line x1="1376.0" y1="143.5" x2="1376.0" y2="238.0" class="signal-line"/><g transform="translate(1376.0,143.5)"><circle cx="0.0" cy="0.0" r="16.5" class="sym"/></g><text x="1376.0" y="142.5" class="bubble-letters" text-anchor="middle">PI</text><text x="1376.0" y="153.5" class="bubble-number" text-anchor="middle">1215</text>
+<polyline points="704.0,111.0 704.0,156.2 730.3,156.2 730.3,198.0" class="loop-link"/>
+<polyline points="968.2,92.0 968.2,172.8 535.4,172.8 535.4,250.0" class="loop-link"/>
+<polyline points="379.0,174.0 379.0,274.0 254.0,274.0 254.0,370.5" class="loop-link"/>
+<polyline points="1068.0,134.0 1068.0,172.8 1400.5,172.8 1400.5,208.0" class="loop-link"/>
+<text x="268.5" y="192.0" class="line-label" text-anchor="middle">8"-OIL-1201-CS150</text>
+<text x="489.5" y="168.0" class="line-label" text-anchor="middle">6"-OIL-1202-CS150</text>
+<text x="518.5" y="414.0" class="line-label" text-anchor="middle">6"-OIL-1203-CS150</text>
+<text x="652.5" y="218.0" class="line-label" text-anchor="middle">4"-OIL-1204-CS150</text>
+<text x="689.5" y="402.0" class="line-label" text-anchor="middle">4"-OIL-1205-CS150</text>
+<text x="974.5" y="208.0" class="line-label" text-anchor="middle">4"-OIL-1206-CS150J</text>
+<text x="333.5" y="393.0" class="line-label" text-anchor="middle">2"-ST-1207-CS300</text>
+<text x="1632.0" y="393.0" class="line-label" text-anchor="middle">1"-SC-1208-CS300</text>
+<text x="1190.5" y="264.0" class="line-label" text-anchor="middle">4"-PS-1209-CS150J</text>
+<text x="1343.0" y="218.0" class="line-label" text-anchor="middle">3"-PS-1210-CS150J</text>
+<text x="1608.5" y="244.0" class="line-label" text-anchor="middle">3"-OIL-1211-CS150</text>
+<text x="1863.5" y="231.0" class="line-label" text-anchor="middle">3"-OIL-1212-CS150</text>
+<text x="239.5" y="527.0" class="line-label" text-anchor="middle">1-1/2"-N2-1213-CS150</text>
+<text x="1793.5" y="490.0" class="line-label" text-anchor="middle">2"-VE-1214-CS150</text>
+<text x="1518.0" y="539.0" class="line-label" text-anchor="middle">2"-VE-1215-CS150</text>
+<text x="1632.0" y="542.0" class="line-label" text-anchor="middle">1"-VE-1217-CS150</text>
+<text x="1790.5" y="617.0" class="line-label" text-anchor="middle">3"-SL-1216-CS150</text>
+</g>
+<rect x="24.0" y="798.8" width="430.0" height="96.0" class="frame"/>
+<text x="34.0" y="814.8" class="legend-head" text-anchor="start">LEGEND</text>
+<line x1="36.0" y1="832.8" x2="86.0" y2="832.8" class="process-line"/>
+<text x="94.0" y="835.8" class="note" text-anchor="start">Process line</text>
+<line x1="36.0" y1="850.8" x2="86.0" y2="850.8" class="utility-line"/>
+<text x="94.0" y="853.8" class="note" text-anchor="start">Utility line</text>
+<line x1="36.0" y1="868.8" x2="86.0" y2="868.8" class="signal-line"/>
+<text x="94.0" y="871.8" class="note" text-anchor="start">Instrument signal</text>
+<g transform="translate(244.0,838.8) scale(0.62)"><circle cx="0.0" cy="0.0" r="16.5" class="sym"/></g>
+<text x="260.0" y="842.8" class="note" text-anchor="start">Field</text>
+<g transform="translate(344.0,838.8) scale(0.62)"><rect x="-16.5" y="-16.5" width="33.0" height="33.0" rx="0.0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="16.5" class="sym"/><line x1="-16.5" y1="0.0" x2="16.5" y2="0.0" class="sym-thin"/></g>
+<text x="360.0" y="842.8" class="note" text-anchor="start">DCS</text>
+<g transform="translate(244.0,878.8) scale(0.62)"><polygon points="0,-22.3 22.3,0 0,22.3 -22.3,0" class="sym-fill-bg"/><circle cx="0.0" cy="0.0" r="13.2" class="sym"/></g>
+<text x="260.0" y="882.8" class="note" text-anchor="start">PLC</text>
+<text x="486.0" y="810.8" class="legend-head" text-anchor="start">NOTES</text>
+<text x="486.0" y="824.8" class="note" text-anchor="start">1. All oil lines insulated and heat traced to maintain 180 degF minimum</text>
+<text x="486.0" y="835.8" class="note" text-anchor="start">2. Slurry lines sloped 1:100 to the pump suction with no pockets</text>
+<text x="486.0" y="846.8" class="note" text-anchor="start">3. Spent earth discharge valve is opened only for filter discharge</text>
+<text x="486.0" y="857.8" class="note" text-anchor="start">4. Assumed: Bleaching earth dosing and the vacuum system are on adjacent drawings</text>
+<text x="486.0" y="868.8" class="note" text-anchor="start">5. Assumed: Day tank design pressure taken as 15 psig for a nitrogen-blanketed atmospheric tank</text>
+<rect x="1662.0" y="798.8" width="380.0" height="96.0" class="frame"/>
+<line x1="1662.0" y1="828.8" x2="2042.0" y2="828.8" class="rule"/>
+<line x1="1662.0" y1="860.8" x2="2042.0" y2="860.8" class="rule"/>
+<line x1="1966.0" y1="860.8" x2="1966.0" y2="894.8" class="rule"/>
+<text x="1672.0" y="818.8" class="title-minor" text-anchor="start">Refinery — Oil Processing</text>
+<text x="1672.0" y="850.8" class="title-major" text-anchor="start">Oil Bleaching Unit</text>
+<text x="1672.0" y="878.8" class="title-minor" text-anchor="start">DWG PID-1200-001</text>
+<text x="2004.0" y="872.8" class="title-minor" text-anchor="middle">REV</text>
+<text x="2004.0" y="886.8" class="title-major" text-anchor="middle">A</text>
+</svg>

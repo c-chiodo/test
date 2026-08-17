@@ -1,0 +1,20 @@
+tag,function,description,attached_to,loop,location,signal,range_low,range_high,units,setpoint,notes
+FIC-1201,Flow rate / Indicate / Control,Bleacher feed flow controller,"4""-OIL-1204-CS150",1201,shared_display,electric,,,gpm,150 gpm,
+FT-1201,Flow rate / Transmit,Bleacher feed flow,"4""-OIL-1204-CS150",1201,field,electric,0.0,250.0,gpm,,
+LIC-1204,Level / Indicate / Control,Bleacher level controller,V-1201,1204,shared_display,electric,,,%,60 %,
+LSLL-1206,Level / Switch / Low / Low,"Day tank low-low level, feed pump protection",TK-1201,1206,plc,electric,,,%,8 %,
+LT-1204,Level / Transmit,Bleacher level,V-1201,1204,field,electric,0.0,100.0,%,,"Guided wave radar, slurry service"
+LT-1205,Level / Transmit,Day tank level,TK-1201,1205,shared_display,electric,0.0,100.0,%,,
+PDI-1211,Pressure / Differential / Indicate,Earth filter differential pressure,F-1201,1211,shared_display,electric,0.0,60.0,psid,,Rising dP indicates filter cake build-up
+PI-1207,Pressure / Indicate,Feed pump A discharge pressure,"4""-OIL-1204-CS150",1207,field,electric,,,psig,,
+PI-1208,Pressure / Indicate,Feed pump B discharge pressure,"4""-OIL-1205-CS150",1208,field,electric,,,psig,,
+PI-1209,Pressure / Indicate,Bleacher operating pressure,V-1201,1209,field,electric,,,mmHg abs,,
+PI-1215,Pressure / Indicate,Discharge pump pressure,"3""-PS-1210-CS150J",1215,field,electric,,,psig,,
+PIC-1203,Pressure / Indicate / Control,Day tank blanket pressure controller,TK-1201,1203,shared_display,electric,,,psig,0.5 psig,
+PSH-1214,Pressure / Switch / High,Bleacher high pressure trip,V-1201,1214,plc,electric,,,psig,35 psig,
+PT-1203,Pressure / Transmit,Day tank vapour space pressure,TK-1201,1203,field,electric,-1.0,15.0,psig,,
+TE-1202,Temperature / Sensor,Heater outlet oil temperature element,"4""-OIL-1206-CS150J",1202,field,electric,,,,,316L thermowell
+TI-1210,Temperature / Indicate,Bleacher contact temperature,V-1201,1210,shared_display,electric,,,degF,,
+TIC-1202,Temperature / Indicate / Control,Heater outlet temperature controller,"4""-OIL-1206-CS150J",1202,shared_display,electric,,,degF,220 degF,
+TSH-1213,Temperature / Switch / High,Heater outlet high temperature trip,"4""-OIL-1206-CS150J",1213,plc,electric,,,degF,245 degF,
+TT-1202,Temperature / Transmit,Heater outlet oil temperature,"4""-OIL-1206-CS150J",1202,field,electric,100.0,300.0,degF,,

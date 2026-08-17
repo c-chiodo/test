@@ -1,0 +1,5 @@
+loop,description,controlled_variable,measurements,controller,final_element,fail_position,action,setpoint,cascade_from,notes
+1201,Bleacher feed flow control,Oil feed rate to the bleacher,FE-1201; FT-1201,FIC-1201,FV-1201,fail_closed,reverse,150 gpm,,
+1202,Heater outlet temperature control,Oil temperature entering the bleacher,TE-1202; TT-1202,TIC-1202,TV-1202,fail_closed,reverse,220 degF,,Steam throttled to hold bleaching contact temperature
+1203,Day tank nitrogen blanket pressure control,Day tank vapour space pressure,PT-1203,PIC-1203,PV-1203,fail_closed,reverse,0.5 psig,,
+1204,Bleacher level control,Bleacher working level,LT-1204,LIC-1204,LV-1204,fail_closed,direct,60 %,,Discharge throttled to hold contact time

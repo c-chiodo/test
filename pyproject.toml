@@ -4,9 +4,18 @@ version = "0.1.0"
 description = "Weather-driven soybean yield & oil composition prediction"
 requires-python = ">=3.11"
 
+[project.optional-dependencies]
+# The `pid` package needs the Anthropic SDK only to *build* a drawing. Checking,
+# rendering and exporting a saved P&ID are pure local work, so the SDK stays out
+# of requirements.txt and off the deployed web app's image.
+pid = ["anthropic>=0.60", "pydantic>=2.7"]
+
+[project.scripts]
+pid = "pid.cli:main"
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
 
 [tool.setuptools]
-packages = ["soyoil", "api"]
+packages = ["soyoil", "api", "pid", "pid.agents"]

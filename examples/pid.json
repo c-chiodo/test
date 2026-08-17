@@ -1,0 +1,1370 @@
+{
+  "project": "Refinery — Oil Processing",
+  "drawing_number": "PID-1200-001",
+  "title": "Oil Bleaching Unit",
+  "revision": "A",
+  "description": "Degummed oil is drawn from the day tank by the bleacher feed pumps, heated against LP steam, and contacted with bleaching earth under vacuum in the bleacher. The slurry is pumped to the earth filter and a polish filter before going to deodorising.",
+  "equipment": [
+    {
+      "tag": "OSBL-1201",
+      "name": "From degummed oil storage",
+      "kind": "boundary",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "",
+          "size_in": null
+        }
+      ],
+      "design_pressure_psig": null,
+      "design_temp_f": null,
+      "capacity": "",
+      "material": "",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "OSBL-1202",
+      "name": "To deodoriser",
+      "kind": "boundary",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "",
+          "size_in": null
+        }
+      ],
+      "design_pressure_psig": null,
+      "design_temp_f": null,
+      "capacity": "",
+      "material": "",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "OSBL-1203",
+      "name": "LP steam supply",
+      "kind": "boundary",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "",
+          "size_in": null
+        }
+      ],
+      "design_pressure_psig": null,
+      "design_temp_f": null,
+      "capacity": "",
+      "material": "",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "OSBL-1204",
+      "name": "Condensate return",
+      "kind": "boundary",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "",
+          "size_in": null
+        }
+      ],
+      "design_pressure_psig": null,
+      "design_temp_f": null,
+      "capacity": "",
+      "material": "",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "OSBL-1205",
+      "name": "Nitrogen supply",
+      "kind": "boundary",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "",
+          "size_in": null
+        }
+      ],
+      "design_pressure_psig": null,
+      "design_temp_f": null,
+      "capacity": "",
+      "material": "",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "OSBL-1206",
+      "name": "To vent header",
+      "kind": "boundary",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "",
+          "size_in": null
+        }
+      ],
+      "design_pressure_psig": null,
+      "design_temp_f": null,
+      "capacity": "",
+      "material": "",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "OSBL-1207",
+      "name": "Spent earth to disposal",
+      "kind": "boundary",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "",
+          "size_in": null
+        }
+      ],
+      "design_pressure_psig": null,
+      "design_temp_f": null,
+      "capacity": "",
+      "material": "",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "TK-1201",
+      "name": "Degummed oil day tank",
+      "kind": "tank",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "Degummed oil feed",
+          "size_in": 8.0
+        },
+        {
+          "name": "N2",
+          "kind": "outlet",
+          "description": "Suction header",
+          "size_in": 6.0
+        },
+        {
+          "name": "N3",
+          "kind": "utility_in",
+          "description": "Nitrogen blanket",
+          "size_in": 1.5
+        },
+        {
+          "name": "N4",
+          "kind": "relief",
+          "description": "Relief and vent",
+          "size_in": 2.0
+        }
+      ],
+      "design_pressure_psig": 15.0,
+      "design_temp_f": 200.0,
+      "capacity": "12,000 gal",
+      "material": "Carbon steel, epoxy lined",
+      "insulated": true,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "P-1201A",
+      "name": "Bleacher feed pump",
+      "kind": "pump",
+      "ports": [
+        {
+          "name": "suction",
+          "kind": "inlet",
+          "description": "",
+          "size_in": 6.0
+        },
+        {
+          "name": "discharge",
+          "kind": "outlet",
+          "description": "",
+          "size_in": 4.0
+        }
+      ],
+      "design_pressure_psig": 150.0,
+      "design_temp_f": 250.0,
+      "capacity": "150 gpm @ 140 ft TDH",
+      "material": "316L SS",
+      "insulated": false,
+      "spared_by": "P-1201B",
+      "notes": ""
+    },
+    {
+      "tag": "P-1201B",
+      "name": "Bleacher feed pump, installed spare",
+      "kind": "pump",
+      "ports": [
+        {
+          "name": "suction",
+          "kind": "inlet",
+          "description": "",
+          "size_in": 6.0
+        },
+        {
+          "name": "discharge",
+          "kind": "outlet",
+          "description": "",
+          "size_in": 4.0
+        }
+      ],
+      "design_pressure_psig": 150.0,
+      "design_temp_f": 250.0,
+      "capacity": "150 gpm @ 140 ft TDH",
+      "material": "316L SS",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "E-1201",
+      "name": "Bleacher feed heater",
+      "kind": "heat_exchanger",
+      "ports": [
+        {
+          "name": "P1",
+          "kind": "inlet",
+          "description": "Oil in, tube side",
+          "size_in": 4.0
+        },
+        {
+          "name": "P2",
+          "kind": "outlet",
+          "description": "Oil out, tube side",
+          "size_in": 4.0
+        },
+        {
+          "name": "U1",
+          "kind": "utility_in",
+          "description": "Steam in, shell side",
+          "size_in": 2.0
+        },
+        {
+          "name": "U2",
+          "kind": "utility_out",
+          "description": "Condensate out",
+          "size_in": 1.0
+        },
+        {
+          "name": "R1",
+          "kind": "relief",
+          "description": "Tube-side relief",
+          "size_in": 1.0
+        }
+      ],
+      "design_pressure_psig": 150.0,
+      "design_temp_f": 350.0,
+      "capacity": "2.1 MMBtu/h, shell and tube",
+      "material": "316L SS tubes, CS shell",
+      "insulated": true,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "V-1201",
+      "name": "Bleacher",
+      "kind": "vessel",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "Heated oil in",
+          "size_in": 4.0
+        },
+        {
+          "name": "N2",
+          "kind": "outlet",
+          "description": "Slurry out",
+          "size_in": 4.0
+        },
+        {
+          "name": "N3",
+          "kind": "relief",
+          "description": "Relief",
+          "size_in": 2.0
+        }
+      ],
+      "design_pressure_psig": 50.0,
+      "design_temp_f": 250.0,
+      "capacity": "3,000 gal, agitated, 60 mmHg abs",
+      "material": "316L SS",
+      "insulated": true,
+      "spared_by": null,
+      "notes": "Bleaching earth dosed via screw feeder on adjacent drawing"
+    },
+    {
+      "tag": "P-1202",
+      "name": "Bleacher discharge pump",
+      "kind": "pump",
+      "ports": [
+        {
+          "name": "suction",
+          "kind": "inlet",
+          "description": "",
+          "size_in": 4.0
+        },
+        {
+          "name": "discharge",
+          "kind": "outlet",
+          "description": "",
+          "size_in": 3.0
+        }
+      ],
+      "design_pressure_psig": 150.0,
+      "design_temp_f": 250.0,
+      "capacity": "150 gpm @ 90 ft TDH, slurry duty",
+      "material": "316L SS",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "F-1201",
+      "name": "Bleaching earth filter",
+      "kind": "filter",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "Slurry in",
+          "size_in": 3.0
+        },
+        {
+          "name": "N2",
+          "kind": "outlet",
+          "description": "Filtered oil out",
+          "size_in": 3.0
+        },
+        {
+          "name": "N3",
+          "kind": "drain",
+          "description": "Spent earth discharge",
+          "size_in": 3.0
+        }
+      ],
+      "design_pressure_psig": 90.0,
+      "design_temp_f": 250.0,
+      "capacity": "900 ft2 vertical leaf",
+      "material": "316L SS",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    },
+    {
+      "tag": "F-1202",
+      "name": "Polish filter",
+      "kind": "filter",
+      "ports": [
+        {
+          "name": "N1",
+          "kind": "inlet",
+          "description": "",
+          "size_in": 3.0
+        },
+        {
+          "name": "N2",
+          "kind": "outlet",
+          "description": "",
+          "size_in": 3.0
+        }
+      ],
+      "design_pressure_psig": 90.0,
+      "design_temp_f": 250.0,
+      "capacity": "120 ft2 cartridge",
+      "material": "316L SS",
+      "insulated": false,
+      "spared_by": null,
+      "notes": ""
+    }
+  ],
+  "streams": [
+    {
+      "number": "8\"-OIL-1201-CS150",
+      "source": {
+        "equipment": "OSBL-1201",
+        "port": null
+      },
+      "destination": {
+        "equipment": "TK-1201",
+        "port": "N1"
+      },
+      "service": "OIL",
+      "description": "Degummed oil to day tank",
+      "size_in": 8.0,
+      "spec": "CS150",
+      "phase": "liquid",
+      "inline": [
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Tie-in isolation"
+        }
+      ],
+      "insulated": false,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "6\"-OIL-1202-CS150",
+      "source": {
+        "equipment": "TK-1201",
+        "port": "N2"
+      },
+      "destination": {
+        "equipment": "P-1201A",
+        "port": "suction"
+      },
+      "service": "OIL",
+      "description": "Day tank to feed pump A suction",
+      "size_in": 6.0,
+      "spec": "CS150",
+      "phase": "liquid",
+      "inline": [
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Suction isolation, locked open"
+        },
+        {
+          "type": "strainer",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Y-type, 40 mesh"
+        }
+      ],
+      "insulated": true,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "6\"-OIL-1203-CS150",
+      "source": {
+        "equipment": "TK-1201",
+        "port": "N2"
+      },
+      "destination": {
+        "equipment": "P-1201B",
+        "port": "suction"
+      },
+      "service": "OIL",
+      "description": "Day tank to feed pump B suction",
+      "size_in": 6.0,
+      "spec": "CS150",
+      "phase": "liquid",
+      "inline": [
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Suction isolation, locked open"
+        },
+        {
+          "type": "strainer",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Y-type, 40 mesh"
+        }
+      ],
+      "insulated": true,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "4\"-OIL-1204-CS150",
+      "source": {
+        "equipment": "P-1201A",
+        "port": "discharge"
+      },
+      "destination": {
+        "equipment": "E-1201",
+        "port": "P1"
+      },
+      "service": "OIL",
+      "description": "Feed pump A discharge to heater",
+      "size_in": 4.0,
+      "spec": "CS150",
+      "phase": "liquid",
+      "inline": [
+        {
+          "type": "check_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": ""
+        },
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Discharge isolation"
+        },
+        {
+          "type": "orifice",
+          "tag": "FE-1201",
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Square-edged, 0-250 gpm"
+        },
+        {
+          "type": "control_valve",
+          "tag": "FV-1201",
+          "fail_position": "fail_closed",
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Fails closed to stop feed on air failure"
+        }
+      ],
+      "insulated": true,
+      "traced": false,
+      "design_flow": "150 gpm",
+      "notes": ""
+    },
+    {
+      "number": "4\"-OIL-1205-CS150",
+      "source": {
+        "equipment": "P-1201B",
+        "port": "discharge"
+      },
+      "destination": {
+        "equipment": "E-1201",
+        "port": "P1"
+      },
+      "service": "OIL",
+      "description": "Feed pump B discharge to heater",
+      "size_in": 4.0,
+      "spec": "CS150",
+      "phase": "liquid",
+      "inline": [
+        {
+          "type": "check_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": ""
+        },
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Discharge isolation"
+        }
+      ],
+      "insulated": true,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "4\"-OIL-1206-CS150J",
+      "source": {
+        "equipment": "E-1201",
+        "port": "P2"
+      },
+      "destination": {
+        "equipment": "V-1201",
+        "port": "N1"
+      },
+      "service": "OIL",
+      "description": "Heated oil to bleacher",
+      "size_in": 4.0,
+      "spec": "CS150J",
+      "phase": "liquid",
+      "inline": [],
+      "insulated": true,
+      "traced": true,
+      "design_flow": "150 gpm at 220 degF",
+      "notes": ""
+    },
+    {
+      "number": "2\"-ST-1207-CS300",
+      "source": {
+        "equipment": "OSBL-1203",
+        "port": null
+      },
+      "destination": {
+        "equipment": "E-1201",
+        "port": "U1"
+      },
+      "service": "ST",
+      "description": "LP steam to feed heater",
+      "size_in": 2.0,
+      "spec": "CS300",
+      "phase": "steam",
+      "inline": [
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Steam isolation"
+        },
+        {
+          "type": "control_valve",
+          "tag": "TV-1202",
+          "fail_position": "fail_closed",
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Fails closed to cut heat input on air failure"
+        }
+      ],
+      "insulated": true,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "1\"-SC-1208-CS300",
+      "source": {
+        "equipment": "E-1201",
+        "port": "U2"
+      },
+      "destination": {
+        "equipment": "OSBL-1204",
+        "port": null
+      },
+      "service": "SC",
+      "description": "Condensate to return header",
+      "size_in": 1.0,
+      "spec": "CS300",
+      "phase": "liquid",
+      "inline": [
+        {
+          "type": "steam_trap",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": ""
+        },
+        {
+          "type": "check_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": ""
+        }
+      ],
+      "insulated": true,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "4\"-PS-1209-CS150J",
+      "source": {
+        "equipment": "V-1201",
+        "port": "N2"
+      },
+      "destination": {
+        "equipment": "P-1202",
+        "port": "suction"
+      },
+      "service": "PS",
+      "description": "Bleacher slurry to discharge pump",
+      "size_in": 4.0,
+      "spec": "CS150J",
+      "phase": "slurry",
+      "inline": [
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Suction isolation"
+        }
+      ],
+      "insulated": true,
+      "traced": true,
+      "design_flow": "",
+      "notes": "Slope 1:100 to pump, no pockets"
+    },
+    {
+      "number": "3\"-PS-1210-CS150J",
+      "source": {
+        "equipment": "P-1202",
+        "port": "discharge"
+      },
+      "destination": {
+        "equipment": "F-1201",
+        "port": "N1"
+      },
+      "service": "PS",
+      "description": "Slurry to bleaching earth filter",
+      "size_in": 3.0,
+      "spec": "CS150J",
+      "phase": "slurry",
+      "inline": [
+        {
+          "type": "check_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": ""
+        },
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Discharge isolation"
+        },
+        {
+          "type": "control_valve",
+          "tag": "LV-1204",
+          "fail_position": "fail_closed",
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Throttles on bleacher level; fails closed to hold inventory"
+        }
+      ],
+      "insulated": true,
+      "traced": true,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "3\"-OIL-1211-CS150",
+      "source": {
+        "equipment": "F-1201",
+        "port": "N2"
+      },
+      "destination": {
+        "equipment": "F-1202",
+        "port": "N1"
+      },
+      "service": "OIL",
+      "description": "Filtered oil to polish filter",
+      "size_in": 3.0,
+      "spec": "CS150",
+      "phase": "liquid",
+      "inline": [
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": ""
+        }
+      ],
+      "insulated": true,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "3\"-OIL-1212-CS150",
+      "source": {
+        "equipment": "F-1202",
+        "port": "N2"
+      },
+      "destination": {
+        "equipment": "OSBL-1202",
+        "port": null
+      },
+      "service": "OIL",
+      "description": "Bleached oil to deodoriser",
+      "size_in": 3.0,
+      "spec": "CS150",
+      "phase": "liquid",
+      "inline": [
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": ""
+        },
+        {
+          "type": "sample_point",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Colour and peroxide value"
+        }
+      ],
+      "insulated": true,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "1-1/2\"-N2-1213-CS150",
+      "source": {
+        "equipment": "OSBL-1205",
+        "port": null
+      },
+      "destination": {
+        "equipment": "TK-1201",
+        "port": "N3"
+      },
+      "service": "N2",
+      "description": "Nitrogen blanket to day tank",
+      "size_in": 1.5,
+      "spec": "CS150",
+      "phase": "gas",
+      "inline": [
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": ""
+        },
+        {
+          "type": "control_valve",
+          "tag": "PV-1203",
+          "fail_position": "fail_closed",
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Fails closed so a stuck valve cannot over-pressure the tank"
+        },
+        {
+          "type": "check_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": false,
+          "notes": "Prevents oil vapour into the N2 header"
+        }
+      ],
+      "insulated": false,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "2\"-VE-1214-CS150",
+      "source": {
+        "equipment": "V-1201",
+        "port": "N3"
+      },
+      "destination": {
+        "equipment": "OSBL-1206",
+        "port": null
+      },
+      "service": "VE",
+      "description": "Bleacher relief to vent header",
+      "size_in": 2.0,
+      "spec": "CS150",
+      "phase": "vapor",
+      "inline": [
+        {
+          "type": "relief_valve",
+          "tag": "PSV-1201",
+          "fail_position": null,
+          "set_pressure_psig": 45.0,
+          "normally_closed": false,
+          "notes": "Blocked-outlet case, 2 in x 3 in, set below the 50 psig MAWP"
+        }
+      ],
+      "insulated": false,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "2\"-VE-1215-CS150",
+      "source": {
+        "equipment": "TK-1201",
+        "port": "N4"
+      },
+      "destination": {
+        "equipment": "OSBL-1206",
+        "port": null
+      },
+      "service": "VE",
+      "description": "Day tank relief and vent",
+      "size_in": 2.0,
+      "spec": "CS150",
+      "phase": "vapor",
+      "inline": [
+        {
+          "type": "relief_valve",
+          "tag": "PSV-1202",
+          "fail_position": null,
+          "set_pressure_psig": 12.0,
+          "normally_closed": false,
+          "notes": "Nitrogen regulator failure case"
+        }
+      ],
+      "insulated": false,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "1\"-VE-1217-CS150",
+      "source": {
+        "equipment": "E-1201",
+        "port": "R1"
+      },
+      "destination": {
+        "equipment": "OSBL-1206",
+        "port": null
+      },
+      "service": "VE",
+      "description": "Heater tube-side thermal relief",
+      "size_in": 1.0,
+      "spec": "CS150",
+      "phase": "liquid",
+      "inline": [
+        {
+          "type": "relief_valve",
+          "tag": "PSV-1203",
+          "fail_position": null,
+          "set_pressure_psig": 140.0,
+          "normally_closed": false,
+          "notes": "Tube side blocked in against LP steam; thermal expansion case"
+        }
+      ],
+      "insulated": false,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    },
+    {
+      "number": "3\"-SL-1216-CS150",
+      "source": {
+        "equipment": "F-1201",
+        "port": "N3"
+      },
+      "destination": {
+        "equipment": "OSBL-1207",
+        "port": null
+      },
+      "service": "SL",
+      "description": "Spent bleaching earth to disposal bin",
+      "size_in": 3.0,
+      "spec": "CS150",
+      "phase": "solid",
+      "inline": [
+        {
+          "type": "gate_valve",
+          "tag": null,
+          "fail_position": null,
+          "set_pressure_psig": null,
+          "normally_closed": true,
+          "notes": "Opened only for filter discharge"
+        }
+      ],
+      "insulated": false,
+      "traced": false,
+      "design_flow": "",
+      "notes": ""
+    }
+  ],
+  "instruments": [
+    {
+      "tag": "FT-1201",
+      "description": "Bleacher feed flow",
+      "attached_to": "4\"-OIL-1204-CS150",
+      "location": "field",
+      "signal": "electric",
+      "loop": "1201",
+      "range_low": 0.0,
+      "range_high": 250.0,
+      "units": "gpm",
+      "setpoint": "",
+      "notes": ""
+    },
+    {
+      "tag": "FIC-1201",
+      "description": "Bleacher feed flow controller",
+      "attached_to": "4\"-OIL-1204-CS150",
+      "location": "shared_display",
+      "signal": "electric",
+      "loop": "1201",
+      "range_low": null,
+      "range_high": null,
+      "units": "gpm",
+      "setpoint": "150 gpm",
+      "notes": ""
+    },
+    {
+      "tag": "TE-1202",
+      "description": "Heater outlet oil temperature element",
+      "attached_to": "4\"-OIL-1206-CS150J",
+      "location": "field",
+      "signal": "electric",
+      "loop": "1202",
+      "range_low": null,
+      "range_high": null,
+      "units": "",
+      "setpoint": "",
+      "notes": "316L thermowell"
+    },
+    {
+      "tag": "TT-1202",
+      "description": "Heater outlet oil temperature",
+      "attached_to": "4\"-OIL-1206-CS150J",
+      "location": "field",
+      "signal": "electric",
+      "loop": "1202",
+      "range_low": 100.0,
+      "range_high": 300.0,
+      "units": "degF",
+      "setpoint": "",
+      "notes": ""
+    },
+    {
+      "tag": "TIC-1202",
+      "description": "Heater outlet temperature controller",
+      "attached_to": "4\"-OIL-1206-CS150J",
+      "location": "shared_display",
+      "signal": "electric",
+      "loop": "1202",
+      "range_low": null,
+      "range_high": null,
+      "units": "degF",
+      "setpoint": "220 degF",
+      "notes": ""
+    },
+    {
+      "tag": "PT-1203",
+      "description": "Day tank vapour space pressure",
+      "attached_to": "TK-1201",
+      "location": "field",
+      "signal": "electric",
+      "loop": "1203",
+      "range_low": -1.0,
+      "range_high": 15.0,
+      "units": "psig",
+      "setpoint": "",
+      "notes": ""
+    },
+    {
+      "tag": "PIC-1203",
+      "description": "Day tank blanket pressure controller",
+      "attached_to": "TK-1201",
+      "location": "shared_display",
+      "signal": "electric",
+      "loop": "1203",
+      "range_low": null,
+      "range_high": null,
+      "units": "psig",
+      "setpoint": "0.5 psig",
+      "notes": ""
+    },
+    {
+      "tag": "LT-1204",
+      "description": "Bleacher level",
+      "attached_to": "V-1201",
+      "location": "field",
+      "signal": "electric",
+      "loop": "1204",
+      "range_low": 0.0,
+      "range_high": 100.0,
+      "units": "%",
+      "setpoint": "",
+      "notes": "Guided wave radar, slurry service"
+    },
+    {
+      "tag": "LIC-1204",
+      "description": "Bleacher level controller",
+      "attached_to": "V-1201",
+      "location": "shared_display",
+      "signal": "electric",
+      "loop": "1204",
+      "range_low": null,
+      "range_high": null,
+      "units": "%",
+      "setpoint": "60 %",
+      "notes": ""
+    },
+    {
+      "tag": "LT-1205",
+      "description": "Day tank level",
+      "attached_to": "TK-1201",
+      "location": "shared_display",
+      "signal": "electric",
+      "loop": null,
+      "range_low": 0.0,
+      "range_high": 100.0,
+      "units": "%",
+      "setpoint": "",
+      "notes": ""
+    },
+    {
+      "tag": "LSLL-1206",
+      "description": "Day tank low-low level, feed pump protection",
+      "attached_to": "TK-1201",
+      "location": "plc",
+      "signal": "electric",
+      "loop": null,
+      "range_low": null,
+      "range_high": null,
+      "units": "%",
+      "setpoint": "8 %",
+      "notes": ""
+    },
+    {
+      "tag": "PI-1207",
+      "description": "Feed pump A discharge pressure",
+      "attached_to": "4\"-OIL-1204-CS150",
+      "location": "field",
+      "signal": "electric",
+      "loop": null,
+      "range_low": null,
+      "range_high": null,
+      "units": "psig",
+      "setpoint": "",
+      "notes": ""
+    },
+    {
+      "tag": "PI-1208",
+      "description": "Feed pump B discharge pressure",
+      "attached_to": "4\"-OIL-1205-CS150",
+      "location": "field",
+      "signal": "electric",
+      "loop": null,
+      "range_low": null,
+      "range_high": null,
+      "units": "psig",
+      "setpoint": "",
+      "notes": ""
+    },
+    {
+      "tag": "PI-1209",
+      "description": "Bleacher operating pressure",
+      "attached_to": "V-1201",
+      "location": "field",
+      "signal": "electric",
+      "loop": null,
+      "range_low": null,
+      "range_high": null,
+      "units": "mmHg abs",
+      "setpoint": "",
+      "notes": ""
+    },
+    {
+      "tag": "TI-1210",
+      "description": "Bleacher contact temperature",
+      "attached_to": "V-1201",
+      "location": "shared_display",
+      "signal": "electric",
+      "loop": null,
+      "range_low": null,
+      "range_high": null,
+      "units": "degF",
+      "setpoint": "",
+      "notes": ""
+    },
+    {
+      "tag": "PDI-1211",
+      "description": "Earth filter differential pressure",
+      "attached_to": "F-1201",
+      "location": "shared_display",
+      "signal": "electric",
+      "loop": null,
+      "range_low": 0.0,
+      "range_high": 60.0,
+      "units": "psid",
+      "setpoint": "",
+      "notes": "Rising dP indicates filter cake build-up"
+    },
+    {
+      "tag": "TSH-1213",
+      "description": "Heater outlet high temperature trip",
+      "attached_to": "4\"-OIL-1206-CS150J",
+      "location": "plc",
+      "signal": "electric",
+      "loop": null,
+      "range_low": null,
+      "range_high": null,
+      "units": "degF",
+      "setpoint": "245 degF",
+      "notes": ""
+    },
+    {
+      "tag": "PSH-1214",
+      "description": "Bleacher high pressure trip",
+      "attached_to": "V-1201",
+      "location": "plc",
+      "signal": "electric",
+      "loop": null,
+      "range_low": null,
+      "range_high": null,
+      "units": "psig",
+      "setpoint": "35 psig",
+      "notes": ""
+    },
+    {
+      "tag": "PI-1215",
+      "description": "Discharge pump pressure",
+      "attached_to": "3\"-PS-1210-CS150J",
+      "location": "field",
+      "signal": "electric",
+      "loop": null,
+      "range_low": null,
+      "range_high": null,
+      "units": "psig",
+      "setpoint": "",
+      "notes": ""
+    }
+  ],
+  "loops": [
+    {
+      "number": "1201",
+      "description": "Bleacher feed flow control",
+      "controlled_variable": "Oil feed rate to the bleacher",
+      "measurement_tags": [
+        "FE-1201",
+        "FT-1201"
+      ],
+      "controller_tag": "FIC-1201",
+      "final_element_tag": "FV-1201",
+      "action": "reverse",
+      "setpoint": "150 gpm",
+      "cascade_from": null,
+      "notes": ""
+    },
+    {
+      "number": "1202",
+      "description": "Heater outlet temperature control",
+      "controlled_variable": "Oil temperature entering the bleacher",
+      "measurement_tags": [
+        "TE-1202",
+        "TT-1202"
+      ],
+      "controller_tag": "TIC-1202",
+      "final_element_tag": "TV-1202",
+      "action": "reverse",
+      "setpoint": "220 degF",
+      "cascade_from": null,
+      "notes": "Steam throttled to hold bleaching contact temperature"
+    },
+    {
+      "number": "1203",
+      "description": "Day tank nitrogen blanket pressure control",
+      "controlled_variable": "Day tank vapour space pressure",
+      "measurement_tags": [
+        "PT-1203"
+      ],
+      "controller_tag": "PIC-1203",
+      "final_element_tag": "PV-1203",
+      "action": "reverse",
+      "setpoint": "0.5 psig",
+      "cascade_from": null,
+      "notes": ""
+    },
+    {
+      "number": "1204",
+      "description": "Bleacher level control",
+      "controlled_variable": "Bleacher working level",
+      "measurement_tags": [
+        "LT-1204"
+      ],
+      "controller_tag": "LIC-1204",
+      "final_element_tag": "LV-1204",
+      "action": "direct",
+      "setpoint": "60 %",
+      "cascade_from": null,
+      "notes": "Discharge throttled to hold contact time"
+    }
+  ],
+  "interlocks": [
+    {
+      "tag": "I-1201",
+      "description": "Day tank low-low level stops the feed pumps to prevent dry running",
+      "initiators": [
+        "LSLL-1206"
+      ],
+      "actions": [
+        "Stop P-1201A",
+        "Stop P-1201B",
+        "Close FV-1201"
+      ],
+      "trip_setpoint": "8 % level",
+      "reset": "manual",
+      "sil": ""
+    },
+    {
+      "tag": "I-1202",
+      "description": "Heater outlet high temperature cuts steam to protect oil quality",
+      "initiators": [
+        "TSH-1213"
+      ],
+      "actions": [
+        "Close TV-1202"
+      ],
+      "trip_setpoint": "245 degF",
+      "reset": "automatic",
+      "sil": ""
+    },
+    {
+      "tag": "I-1203",
+      "description": "Bleacher high pressure stops feed and heat input",
+      "initiators": [
+        "PSH-1214"
+      ],
+      "actions": [
+        "Close FV-1201",
+        "Close TV-1202",
+        "Stop P-1201A",
+        "Stop P-1201B"
+      ],
+      "trip_setpoint": "35 psig",
+      "reset": "manual",
+      "sil": "SIL 1"
+    }
+  ],
+  "assumptions": [
+    "Bleaching earth dosing and the vacuum system are on adjacent drawings",
+    "Day tank design pressure taken as 15 psig for a nitrogen-blanketed atmospheric tank"
+  ],
+  "notes": [
+    "All oil lines insulated and heat traced to maintain 180 degF minimum",
+    "Slurry lines sloped 1:100 to the pump suction with no pockets",
+    "Spent earth discharge valve is opened only for filter discharge"
+  ]
+}

@@ -1,0 +1,4 @@
+tag,description,initiators,trip_setpoint,actions,reset,sil
+I-1201,Day tank low-low level stops the feed pumps to prevent dry running,LSLL-1206,8 % level,Stop P-1201A; Stop P-1201B; Close FV-1201,manual,
+I-1202,Heater outlet high temperature cuts steam to protect oil quality,TSH-1213,245 degF,Close TV-1202,automatic,
+I-1203,Bleacher high pressure stops feed and heat input,PSH-1214,35 psig,Close FV-1201; Close TV-1202; Stop P-1201A; Stop P-1201B,manual,SIL 1
