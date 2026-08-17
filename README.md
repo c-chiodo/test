@@ -54,6 +54,8 @@ soyoil/               core science + ML package
 api/main.py           FastAPI app (OpenAPI docs at /docs)
 web/                  React + Vite + Recharts app (marketing + dashboard)
 pid/                  agentic P&ID builder (separate tool — see docs/PID_BUILDER.md)
+pims/                 PIMS replacement — API + business rules (see docs/PIMS.md)
+pimsweb/              PIMS browser client (React + Vite)
 tests/                model credibility gates + P&ID builder suite
 research/             three deep research briefs (agronomy, data sources, ML design)
 docs/MODEL_CARD.md    validation, limitations, and what we must not claim
@@ -81,6 +83,34 @@ ordinary code, so `pid validate`, `pid render` and `pid export` are free and
 reproducible. It produces a drawing for engineers to review; it is not a
 substitute for a HAZOP or a P.E. stamp. Details in
 [docs/PID_BUILDER.md](docs/PID_BUILDER.md).
+
+## Also in this repo: PIMS
+
+`pims/` and `pimsweb/` are a replacement for Feed Energy's PIMS — the VB.NET
+WinForms Production Inventory Management System that plant, lab and QC staff
+use for orders, receiving, production, movement, loading, shipping, shrinkage
+and quality control. Same workflows, browser-based, with the business rules in
+tested Python instead of stored procedures and a compiled event handler.
+
+```bash
+python -m pims init-db       # create and seed a demo database
+python -m pims serve         # http://127.0.0.1:8080 (API docs at /docs)
+python -m pims diagnose      # every health check; exit 1 if any failed
+```
+
+The second half of the job is being able to support it: a health endpoint per
+dependency, a data-quality probe that lists the rows behind each finding, an
+audit trail with before/after values, and correlation ids that tie a user's
+error message to a log line. Both open defects in the legacy system —
+a matrix feature reading a LIMS database that was retired seven months earlier,
+and a QC validation that demanded moisture, temperature and spintest readings
+on products that never run them — are fixed, with tests pinning them, and the
+health checks that would have caught each one are in place.
+
+Documentation: [docs/PIMS.md](docs/PIMS.md) (architecture and screen parity),
+[docs/PIMS_RUNBOOK.md](docs/PIMS_RUNBOOK.md) (support),
+[docs/PIMS_DEFECTS.md](docs/PIMS_DEFECTS.md) (legacy defect register),
+[docs/PIMS_MIGRATION.md](docs/PIMS_MIGRATION.md) (cutover).
 
 ## API surface
 

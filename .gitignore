@@ -9,3 +9,9 @@ soyoil/data/cache/
 nohup.out
 *.log
 web/tsconfig.tsbuildinfo
+
+# PIMS: the demo database is generated on first run (`python -m pims init-db`).
+data/pims.db
+data/pims.db-wal
+data/pims.db-shm
+pimsweb/tsconfig.tsbuildinfo

@@ -12,10 +12,14 @@ pid = ["anthropic>=0.60", "pydantic>=2.7"]
 
 [project.scripts]
 pid = "pid.cli:main"
+pims = "pims.__main__:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
 
+[tool.setuptools.package-data]
+pims = ["schema.sql"]
+
 [tool.setuptools]
-packages = ["soyoil", "api", "pid", "pid.agents"]
+packages = ["soyoil", "api", "pid", "pid.agents", "pims", "pims.services"]
