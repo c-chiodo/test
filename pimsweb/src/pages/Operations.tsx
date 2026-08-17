@@ -8,9 +8,9 @@
  * because they tell the operator whether the number they are about to type is
  * possible. */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, useToast } from '../App'
-import { api, qs } from '../lib/api'
+import { api, newKey, qs } from '../lib/api'
 import type { Balance, Order, PendingShipment, Transaction } from '../lib/types'
 import {
   Alert, Badge, Card, DataTable, ErrorBox, Field, Loading, Meter, Tabs,
@@ -129,6 +129,14 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
 
   const set = (patch: Record<string, any>) => setForm((current) => ({ ...current, ...patch }))
 
+  // Move and Load relocate product: same material, same weight. Produce is the
+  // only operation that may change either, because that is what it is for.
+  const relocates = spec.from && spec.to && spec.key !== 'produce'
+  // Minted per form, spent on a successful post: a retry after a dropped
+  // connection returns the transaction that already exists.
+  const idempotencyKey = useRef(newKey())
+  const overLoad = error?.detail?.rule === 'over_fulfilment' ? error.detail : null
+
   const openOrders = useAsync(
     () => api.get<{ rows: Order[] }>(`/api/orders${qs({ plant_id: plantId, open_only: true, limit: 300 })}`),
     [plantId],
@@ -164,16 +172,23 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
     }))
   }, [order?.order_id])
 
-  async function post() {
+  async function post(acknowledgeOverLoad = false) {
     setBusy(true); setError(null)
     try {
       const payload: Record<string, any> = { plant_id: plantId, ...form }
       for (const key of Object.keys(payload)) if (payload[key] === '') payload[key] = null
+      if (relocates) {
+        payload.to_material_id = payload.from_material_id
+        payload.to_qty = payload.from_qty
+      }
+      payload.idempotency_key = idempotencyKey.current
+      if (acknowledgeOverLoad) payload.acknowledge_over_load = true
       if (spec.key === 'produce' && !payload.to_qty) payload.to_qty = payload.from_qty
       if (reading && Number(payload.from_qty ?? payload.to_qty) === (reading.net_lbs ?? reading.gross_lbs)) {
         payload.scale_reading_id = reading.reading_id
       }
       const result = await api.post<Transaction>(`/api/transactions/${spec.key}`, payload)
+      idempotencyKey.current = newKey()   // this one is spent; the next post is a new one
       setPosted(result)
       toast.push('success', `${spec.label} posted`, `Transaction ${result.transaction_id}`)
       setForm((current) => ({
@@ -301,8 +316,20 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
                       ))}
                     </select>
                   </Field>
-                  <Field label="To material" error={fieldError('to_material_id')}>
-                    <select value={form.to_material_id} onChange={(event) => set({ to_material_id: event.target.value })}>
+                  {/* A move or a load relocates product; only Produce may turn
+                      one product into another or change the quantity. Offering
+                      a free choice here let a single transaction destroy one
+                      material and create another. */}
+                  <Field
+                    label="To material"
+                    error={fieldError('to_material_id')}
+                    hint={relocates ? 'The same product that is coming out.' : undefined}
+                  >
+                    <select
+                      value={relocates ? form.from_material_id : form.to_material_id}
+                      disabled={relocates}
+                      onChange={(event) => set({ to_material_id: event.target.value })}
+                    >
                       <option value="">Select…</option>
                       {reference.materials.map((material) => (
                         <option key={material.material_id} value={material.material_id}>
@@ -314,9 +341,18 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
                   <Field
                     label="Quantity (lbs)"
                     error={fieldError('to_qty')}
-                    hint={spec.key === 'produce' ? 'Yield may differ from the input quantity.' : undefined}
+                    hint={
+                      spec.key === 'produce'
+                        ? 'Yield may differ from the input quantity.'
+                        : relocates ? 'The same quantity that is coming out.' : undefined
+                    }
                   >
-                    <input type="number" value={form.to_qty} onChange={(event) => set({ to_qty: event.target.value })} />
+                    <input
+                      type="number"
+                      value={relocates ? form.from_qty : form.to_qty}
+                      disabled={relocates}
+                      onChange={(event) => set({ to_qty: event.target.value })}
+                    />
                   </Field>
                   <Field label="BOL" error={fieldError('to_bol')}>
                     <input value={form.to_bol} onChange={(event) => set({ to_bol: event.target.value })} />
@@ -367,11 +403,25 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
             </div>
           )}
 
+          {overLoad && (
+            <div style={{ marginTop: 12 }}>
+              <Alert tone="warn" title={`This puts the order ${fmtLbs(overLoad.over_by)} lbs over`}>
+                {fmtLbs(overLoad.already_loaded)} lbs of {fmtLbs(overLoad.ordered)} lbs are
+                already loaded. Split loads are normal — confirm if this one is meant to go out.
+                <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                  <button className="sm primary" disabled={busy} onClick={() => post(true)}>
+                    Yes, post it anyway
+                  </button>
+                </div>
+              </Alert>
+            </div>
+          )}
+
           <div className="row end" style={{ marginTop: 16 }}>
             {posted?.order_id && (
               <button onClick={() => navigate(`orders/${posted.order_id}`)}>Open order {posted.order_id}</button>
             )}
-            <button className="primary" onClick={post} disabled={busy}>
+            <button className="primary" onClick={() => post()} disabled={busy}>
               {busy ? <span className="spinner" /> : null} Post {spec.label.toLowerCase()}
             </button>
           </div>
@@ -444,6 +494,9 @@ function ShipTrailer() {
   const toast = useToast()
   const [busy, setBusy] = useState<number | null>(null)
   const [bol, setBol] = useState<any>(null)
+  // Every row here is a different truck and the buttons are identical, so the
+  // one that is about to leave is named before it does.
+  const [confirming, setConfirming] = useState<PendingShipment | null>(null)
 
   const staged = useAsync(
     () => api.get<PendingShipment[]>(`/api/shipments/pending?plant_id=${plantId}`), [plantId],
@@ -451,23 +504,44 @@ function ShipTrailer() {
 
   async function ship(stage: PendingShipment) {
     setBusy(stage.stage_id)
+    setConfirming(null)
     try {
       await api.post(`/api/shipments/${stage.stage_id}/ship`, {})
       toast.push('success', `Trailer ${stage.trailer_number} shipped`, `Order ${stage.order_id}`)
       staged.reload()
     } catch (error) {
-      toast.push('error', 'Ship failed', (error as Error).message)
+      toast.push('error', 'Not shipped', (error as Error).message)
     } finally { setBusy(null) }
   }
 
   async function preview(stage: PendingShipment) {
-    try { setBol(await api.get(`/api/orders/${stage.order_id}/bol`)) }
+    // The BOL for this trailer, not for every load on the order.
+    try { setBol(await api.get(`/api/orders/${stage.order_id}/bol${qs({ transaction_id: stage.transaction_id })}`)) }
     catch (error) { toast.push('error', 'Could not build the BOL', (error as Error).message) }
   }
 
   return (
     <div className="grid cols-2">
       <Card title="Staged trailers" subtitle="Loaded and waiting to ship" tight>
+        {confirming && (
+          <div style={{ margin: '0 0 12px' }}>
+            <Alert tone="warn" title={`Ship trailer ${confirming.trailer_number || '—'}?`}>
+              {fmtLbs(confirming.quantity)} lbs of {confirming.material_number}{' '}
+              {confirming.material_description} on BOL {confirming.bol_number}, order{' '}
+              {confirming.order_id} for {confirming.customer_name ?? '—'}.
+              <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                <button
+                  className="sm primary"
+                  disabled={busy === confirming.stage_id}
+                  onClick={() => ship(confirming)}
+                >
+                  Yes, ship trailer {confirming.trailer_number || '—'}
+                </button>
+                <button className="sm" onClick={() => setConfirming(null)}>Cancel</button>
+              </div>
+            </Alert>
+          </div>
+        )}
         {staged.loading ? <Loading /> : (
           <DataTable
             rows={staged.data ?? []}
@@ -478,6 +552,18 @@ function ShipTrailer() {
               { key: 'customer_name', label: 'Customer' },
               { key: 'bol_number', label: 'BOL #' },
               { key: 'trailer_number', label: 'Trailer' },
+              {
+                key: 'material_number',
+                label: 'Product',
+                render: (row) => (
+                  <span>
+                    {row.material_number}
+                    {row.order_material_number && row.order_material_number !== row.material_number && (
+                      <Badge tone="warn">not the ordered product</Badge>
+                    )}
+                  </span>
+                ),
+              },
               { key: 'quantity', label: 'Lbs', numeric: true, render: (row) => fmtLbs(row.quantity) },
               { key: 'loaded_at', label: 'Loaded', render: (row) => fmtDateTime(row.loaded_at) },
               {
@@ -486,8 +572,12 @@ function ShipTrailer() {
                 render: (row) => (
                   <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
                     <button className="sm" onClick={() => preview(row)}>BOL</button>
-                    <button className="primary sm" disabled={busy === row.stage_id} onClick={() => ship(row)}>
-                      Ship
+                    <button
+                      className="primary sm"
+                      disabled={busy === row.stage_id}
+                      onClick={() => setConfirming(row)}
+                    >
+                      Ship {row.trailer_number || ''}
                     </button>
                   </div>
                 ),

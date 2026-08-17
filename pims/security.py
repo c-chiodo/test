@@ -16,6 +16,7 @@ import hashlib
 import hmac
 import os
 import secrets
+import threading
 from datetime import timedelta
 from typing import Any
 
@@ -50,9 +51,23 @@ ROLE_PERMISSIONS: dict[str, set[str]] = {
         "qc.write",
         "query.run",
         "spec.read",
+        # Widening a limit makes a failing result pass, so it is not something
+        # the person reading the result can do on their own.
+        "spec.write",
         "support.read",
     },
     "admin": {"*"},
+}
+
+#: Plain-language names for permissions, and who to ask. A refusal that only
+#: quotes the permission string tells an operator nothing they can act on.
+PERMISSION_HELP: dict[str, tuple[str, str]] = {
+    "txn.void": ("void a transaction", "a supervisor"),
+    "order.write": ("edit an order", "a supervisor"),
+    "order.close": ("close an order", "a supervisor"),
+    "qc.write": ("record QC", "QC or a supervisor"),
+    "spec.write": ("change product limits", "an administrator"),
+    "support.read": ("open the support console", "a supervisor"),
 }
 
 
@@ -97,10 +112,50 @@ def plants_for_user(user_id: int, conn=None) -> list[dict]:
     )
 
 
+#: Failed sign-ins allowed before an account pauses, and for how long. A
+#: four-digit PIN is 10,000 guesses; without a limit a kiosk in a yard is one
+#: patient afternoon away from anyone's account.
+_MAX_ATTEMPTS = 5
+_LOCKOUT_MINUTES = 5
+_attempts: dict[str, list] = {}
+_attempts_lock = threading.Lock()
+
+
+def _check_attempts(key: str) -> None:
+    with _attempts_lock:
+        record = _attempts.get(key)
+        if not record:
+            return
+        count, until = record
+        if count >= _MAX_ATTEMPTS and until > utc_now():
+            wait = max(1, int((until - utc_now()).total_seconds() // 60) + 1)
+            raise AuthError(
+                f"Too many failed attempts. Try again in {wait} minute"
+                f"{'s' if wait != 1 else ''}, or ask a supervisor to sign in.",
+                retry_after_minutes=wait,
+            )
+        if until <= utc_now():
+            _attempts.pop(key, None)
+
+
+def _record_failure(key: str) -> None:
+    with _attempts_lock:
+        count = (_attempts.get(key) or [0, None])[0] + 1
+        _attempts[key] = [count, utc_now() + timedelta(minutes=_LOCKOUT_MINUTES)]
+
+
+def _clear_attempts(key: str) -> None:
+    with _attempts_lock:
+        _attempts.pop(key, None)
+
+
 def login(username: str, password: str, conn=None) -> dict[str, Any]:
+    _check_attempts(f"pw:{username.lower()}")
     user = get_user(username, conn)
     if user is None or not verify_password(password, user["password_hash"]):
+        _record_failure(f"pw:{username.lower()}")
         raise AuthError("Username or password is incorrect.")
+    _clear_attempts(f"pw:{username.lower()}")
     settings = get_settings()
     token = secrets.token_urlsafe(32)
     expires = utc_now() + timedelta(hours=settings.session_hours)
@@ -134,9 +189,12 @@ def login_with_pin(username: str, pin: str, plant_id: int | None = None, conn=No
     so an unattended screen stops being someone else's account.
     """
 
+    _check_attempts(f"pin:{username.lower()}")
     user = get_user(username, conn)
     if user is None or not user.get("pin_hash") or not verify_password(pin, user["pin_hash"]):
+        _record_failure(f"pin:{username.lower()}")
         raise AuthError("That PIN was not recognised.")
+    _clear_attempts(f"pin:{username.lower()}")
     if plant_id is not None:
         require_plant(user, plant_id, conn)
 
@@ -239,12 +297,24 @@ def has_permission(user: dict, permission: str) -> bool:
     return "*" in granted or permission in granted
 
 
-def require_permission(user: dict, permission: str) -> None:
-    if not has_permission(user, permission):
-        raise PermissionError_(
-            f"Your role ({user.get('role')}) cannot {permission.replace('.', ' ')}.",
-            permission=permission,
-        )
+def require_permission(user: dict, permission: str, *, subject: str = "") -> None:
+    """Refuse an action, and say who can do it instead.
+
+    "Your role (operator) cannot txn void." names a permission string and
+    leaves the operator stuck. Naming the action in their words and the person
+    who can do it turns the same refusal into a next step.
+    """
+
+    if has_permission(user, permission):
+        return
+    action, ask = PERMISSION_HELP.get(permission, (permission.replace(".", " "), "a supervisor"))
+    detail = f" ({subject})" if subject else ""
+    raise PermissionError_(
+        f"Your role ({user.get('role')}) cannot {action}{detail}. Ask {ask} to do it.",
+        permission=permission,
+        ask=ask,
+        action=action,
+    )
 
 
 def require_plant(user: dict, plant_id: int, conn=None) -> None:

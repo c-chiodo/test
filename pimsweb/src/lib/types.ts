@@ -47,7 +47,13 @@ export interface Reference {
   customers: { customer_id: number; name: string; gp_custnmbr: string }[]
   vendors: { vendor_id: number; name: string; gp_vendorid: string }[]
   test_points: { test_point_id: number; plant_id: number; name: string }[]
-  qa_questions: { question_id: number; question: string; answer_type: string }[]
+  qa_questions: {
+    question_id: number
+    question: string
+    answer_type: string
+    /** 'pre_load' questions inspect an empty trailer and are asked first. */
+    stage: string
+  }[]
   analytes: { key: string; label: string; unit: string }[]
 }
 
@@ -171,6 +177,9 @@ export interface Transaction {
   remarks: string
   voided: number
   is_reversal: number
+  /** Whether the signed-in user may reverse this row, and why not if they cannot. */
+  can_void?: boolean
+  void_blocked?: string
   [key: string]: any
 }
 
@@ -181,7 +190,13 @@ export interface PendingShipment {
   quantity: number
   customer_name: string | null
   bol_number: string
+  transaction_id: number
+  /** What is actually on the trailer, read from the load. */
   material_number: string | null
+  material_description: string | null
+  /** What the order header says, so a disagreement can be shown. */
+  order_material_number: string | null
+  loaded_by: string | null
   plant_code: string
   loaded_at: string
 }

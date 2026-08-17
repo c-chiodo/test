@@ -233,8 +233,16 @@ CREATE TABLE IF NOT EXISTS inventory_transaction (
     -- offsetting row written to reverse it. Both stay in the ledger and both
     -- count toward balances (they cancel); fulfilment maths excludes the pair.
     voided               INTEGER NOT NULL DEFAULT 0,
-    is_reversal          INTEGER NOT NULL DEFAULT 0
+    is_reversal          INTEGER NOT NULL DEFAULT 0,
+    -- Minted by the client before it posts and held until the post succeeds.
+    -- If the answer is lost on the way back — plant Wi-Fi, a closed laptop —
+    -- the retry carries the same key and returns the transaction that already
+    -- exists instead of putting the load on the truck twice.
+    idempotency_key      TEXT
 );
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_txn_idempotency
+    ON inventory_transaction (idempotency_key) WHERE idempotency_key IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS ix_txn_order    ON inventory_transaction (order_id);
 CREATE INDEX IF NOT EXISTS ix_txn_from_loc ON inventory_transaction (from_location_id, from_material_id);
@@ -247,7 +255,11 @@ CREATE TABLE IF NOT EXISTS pending_shipment (
     transaction_id INTEGER NOT NULL REFERENCES inventory_transaction(transaction_id),
     trailer_number TEXT NOT NULL DEFAULT '',
     quantity       REAL NOT NULL DEFAULT 0,
-    shipped        INTEGER NOT NULL DEFAULT 0
+    -- `shipped` means the trailer left. `cancelled` means the load was voided
+    -- and never left. Both drop the stage off the ship list, and keeping them
+    -- apart is what stops a cancelled load being reported as a shipment.
+    shipped        INTEGER NOT NULL DEFAULT 0,
+    cancelled      INTEGER NOT NULL DEFAULT 0
 );
 
 -- -------------------------------------------------------------------- QC
@@ -271,6 +283,11 @@ CREATE TABLE IF NOT EXISTS qc (
     sample_number       TEXT NOT NULL DEFAULT '',
     blend_serial_number TEXT NOT NULL DEFAULT '',
     comments            TEXT NOT NULL DEFAULT '',
+    -- Out-of-spec results can be saved, but only deliberately: the warnings
+    -- shown at the time are frozen here beside the acknowledgement, so the
+    -- record says what the person was looking at when they signed off.
+    acknowledged_warnings INTEGER NOT NULL DEFAULT 0,
+    warning_snapshot    TEXT NOT NULL DEFAULT '',
     active              INTEGER NOT NULL DEFAULT 1,
     date_added          TEXT NOT NULL,
     added_by            TEXT NOT NULL,
@@ -308,6 +325,10 @@ CREATE TABLE IF NOT EXISTS qa_question (
     question_id INTEGER PRIMARY KEY,
     question    TEXT NOT NULL,
     answer_type TEXT NOT NULL DEFAULT 'yesno',  -- yesno | text | number
+    -- When the question has to be answered: 'pre_load' questions are trailer
+    -- inspections and are worthless once product is in the tank, so the flow
+    -- asks them before the load rather than after it.
+    stage       TEXT NOT NULL DEFAULT 'post_load',  -- pre_load | post_load
     enabled     INTEGER NOT NULL DEFAULT 1,
     sort_order  INTEGER NOT NULL DEFAULT 0
 );
@@ -320,6 +341,7 @@ CREATE TABLE IF NOT EXISTS qa_header (
     trailer_number TEXT NOT NULL DEFAULT '',
     trailer_load_time TEXT,
     comments       TEXT NOT NULL DEFAULT '',
+    stage          TEXT NOT NULL DEFAULT 'post_load',  -- which pass this is
     voided         INTEGER NOT NULL DEFAULT 0,
     date_added     TEXT NOT NULL,
     added_by       TEXT NOT NULL
@@ -392,11 +414,16 @@ CREATE TABLE IF NOT EXISTS audit_log (
     action      TEXT NOT NULL,             -- create|update|void|login|...
     entity      TEXT NOT NULL,
     entity_id   TEXT NOT NULL,
+    -- The order this change belongs to, whatever entity it was recorded
+    -- against. A transaction and a QC record are events in an order's life,
+    -- and the order's history screen is where a supervisor goes looking.
+    order_id    INTEGER,
     summary     TEXT NOT NULL DEFAULT '',
     detail_json TEXT NOT NULL DEFAULT '{}'
 );
 
 CREATE INDEX IF NOT EXISTS ix_audit_entity ON audit_log (entity, entity_id);
+CREATE INDEX IF NOT EXISTS ix_audit_order  ON audit_log (order_id);
 CREATE INDEX IF NOT EXISTS ix_audit_time   ON audit_log (occurred_at);
 
 CREATE TABLE IF NOT EXISTS saved_query (

@@ -13,12 +13,13 @@ that reconciles is the whole point of the system.
 
 from __future__ import annotations
 
+import sqlite3
 from typing import Any
 
 from .. import audit, db
 from ..errors import BusinessRuleError, NotFound, ValidationError
-from ..security import require_permission, require_plant
-from ..util import round_lbs, to_float, today_iso, utc_now_iso
+from ..security import has_permission, require_permission, require_plant
+from ..util import hours_since, round_lbs, to_float, today_iso, utc_now_iso
 from . import numbering
 
 #: Shape of each operation: which endpoints it uses and what it means.
@@ -157,6 +158,66 @@ def _location(location_id: int, conn) -> dict:
     return row
 
 
+def _check_order_material(order: dict, from_material_id: int | None, conn) -> None:
+    """A load must be of the product the order is for.
+
+    Fulfilment used to count any material, so loading the wrong tank both put
+    the wrong feed on the truck and marked the order as progressing. The
+    ledger showed it plainly; nothing looked.
+    """
+
+    if not from_material_id or int(from_material_id) == int(order["material_one_id"]):
+        return
+    wanted = db.query_one(
+        "SELECT number, description FROM material WHERE material_id = ?",
+        (order["material_one_id"],),
+        conn,
+    )
+    loading = db.query_one(
+        "SELECT number, description FROM material WHERE material_id = ?",
+        (from_material_id,),
+        conn,
+    )
+    raise BusinessRuleError(
+        f"Order {order['order_id']} is for {wanted['number']} {wanted['description']}, "
+        f"but this load is {loading['number']} {loading['description']}. "
+        "Check the tank, or post this against the right order.",
+        order_id=order["order_id"],
+        expected=wanted["number"],
+        loading=loading["number"],
+    )
+
+
+def _check_over_fulfilment(order: dict, from_qty: float, acknowledged: bool, conn) -> None:
+    """Loading past the ordered quantity is possible, but never by accident."""
+
+    if acknowledged:
+        return
+    from . import orders as orders_service
+
+    ordered = float(order["material_one_quantity"] or 0)
+    if not ordered:
+        return
+    already = orders_service.progress(order["order_id"], order["order_type_id"], conn)[
+        "qty_fulfilled"
+    ]
+    over = already + from_qty - ordered
+    if over <= 0.01:
+        return
+    raise BusinessRuleError(
+        f"Order {order['order_id']} is for {round_lbs(ordered):,.0f} lbs and "
+        f"{round_lbs(already):,.0f} lbs are already loaded. This load puts it "
+        f"{round_lbs(over):,.0f} lbs over. Confirm to post it anyway, or check "
+        "whether this belongs on another order.",
+        rule="over_fulfilment",
+        order_id=order["order_id"],
+        ordered=round_lbs(ordered),
+        already_loaded=round_lbs(already),
+        over_by=round_lbs(over),
+        acknowledge_field="acknowledge_over_load",
+    )
+
+
 def post(
     operation: str,
     payload: dict[str, Any],
@@ -180,6 +241,19 @@ def post(
             f"{operation} is not an inventory operation.",
             allowed=sorted(OPERATIONS),
         )
+
+    # If the client already posted this and lost the answer, give back the
+    # transaction it made rather than making a second one. The key is minted
+    # once per form, so a genuine second load carries a different one.
+    idempotency_key = (payload.get("idempotency_key") or "").strip() or None
+    if idempotency_key:
+        existing = db.query_one(
+            "SELECT transaction_id FROM inventory_transaction WHERE idempotency_key = ?",
+            (idempotency_key,),
+            conn,
+        )
+        if existing:
+            return get(existing["transaction_id"], conn)
 
     errors: dict[str, str] = {}
     plant_id = payload.get("plant_id")
@@ -236,8 +310,33 @@ def post(
     if operation == "MOVE" and from_location_id and from_location_id == to_location_id:
         errors["to_location_id"] = "From and to locations must differ."
 
+    if operation in {"MOVE", "LOAD"} and not errors:
+        # Moving and loading relocate product. They cannot change what it is,
+        # and they cannot change how much of it there is. PRODUCE is the only
+        # operation allowed to do either, because that is what producing means.
+        if from_material_id != to_material_id:
+            errors["to_material_id"] = (
+                f"A {spec['label'].lower()} moves product, it cannot change it. "
+                "Take out and put in the same product."
+            )
+        elif abs(round_lbs(from_qty) - round_lbs(to_qty)) > 0.01:
+            errors["to_qty"] = (
+                f"{round_lbs(from_qty):,.0f} lbs out but {round_lbs(to_qty):,.0f} lbs in. "
+                "A move cannot create or lose product — use Shrinkage or an "
+                "Adjustment for that."
+            )
+
+    if operation in {"ADJUST", "SHRINK"} and not str(payload.get("remarks") or "").strip():
+        # These are the two operations that change the books without anything
+        # physically moving, so the reason is the only record of why.
+        errors["remarks"] = "Say why the count is being changed."
+
     if errors:
         raise ValidationError("This transaction cannot be posted.", fields=errors)
+
+    if operation == "LOAD" and order and order["material_one_id"]:
+        _check_order_material(order, from_material_id, conn)
+        _check_over_fulfilment(order, from_qty, bool(payload.get("acknowledge_over_load")), conn)
 
     # Locations must belong to the plant being posted against.
     for key, loc_id in (("from_location_id", from_location_id), ("to_location_id", to_location_id)):
@@ -322,7 +421,30 @@ def post(
         "tank_hours": to_float(payload.get("tank_hours")),
         "employee_hours": to_float(payload.get("employee_hours")),
         "remarks": payload.get("remarks") or "",
+        "idempotency_key": idempotency_key,
     }
+
+    try:
+        txn_id = _write(operation, row, payload, order, order_id, from_qty, to_qty, user, conn)
+    except sqlite3.IntegrityError:
+        # Two retries of the same lost post raced each other. The unique index
+        # settled it; the loser returns the winner's transaction rather than
+        # an error the operator would read as "it did not go through".
+        if not idempotency_key:
+            raise
+        existing = db.query_one(
+            "SELECT transaction_id FROM inventory_transaction WHERE idempotency_key = ?",
+            (idempotency_key,),
+            conn,
+        )
+        if existing is None:
+            raise
+        return get(existing["transaction_id"], conn)
+    return get(txn_id, conn)
+
+
+def _write(operation, row, payload, order, order_id, from_qty, to_qty, user, conn) -> int:
+    """Insert the transaction and everything that must land with it."""
 
     with db.transaction(conn):
         txn_id = db.insert("inventory_transaction", row, conn)
@@ -349,6 +471,7 @@ def post(
             action=f"post.{operation.lower()}",
             entity="transaction",
             entity_id=txn_id,
+            order_id=order_id,
             summary=(
                 f"{OPERATIONS[operation]['label']} "
                 f"{round_lbs(from_qty or to_qty):,.0f} lbs"
@@ -357,7 +480,7 @@ def post(
             detail={"values": row},
             conn=conn,
         )
-    return get(txn_id, conn)
+    return txn_id
 
 
 def get(transaction_id: int, conn=None) -> dict:
@@ -367,11 +490,68 @@ def get(transaction_id: int, conn=None) -> dict:
     return row
 
 
+#: How long an operator has to reverse their own posting before it becomes a
+#: supervisor's job. Long enough to notice at the dock, short enough that
+#: yesterday's ledger is settled.
+SELF_VOID_HOURS = 12
+
+
+def can_self_void(txn: dict, user: dict) -> tuple[bool, str]:
+    """Whether an operator may reverse their own posting, and why not.
+
+    Requiring a supervisor for every mistake is what turns a thirty-second
+    correction into a phone call, and a phone call into a load that never gets
+    corrected at all. The scope is deliberately tight: their own posting, not
+    already reversed, not already shipped, and same shift.
+    """
+
+    if txn["user_id"] != user.get("user_id"):
+        return False, "It was posted by someone else."
+    if txn["voided"] or txn["is_reversal"]:
+        return False, "It has already been reversed."
+    age = hours_since(txn["transaction_date"])
+    if age is None or age > SELF_VOID_HOURS:
+        return False, f"It is more than {SELF_VOID_HOURS} hours old."
+    if txn["transaction_type"] == "LOAD":
+        stage = db.query_one(
+            "SELECT shipped FROM pending_shipment WHERE transaction_id = ?",
+            (txn["transaction_id"],),
+        )
+        if stage and stage["shipped"]:
+            return False, "The trailer has already shipped."
+    if txn["transaction_type"] == "SHIP":
+        return False, "The trailer has already left."
+    return True, ""
+
+
+def annotate_void_rights(rows: list[dict], user: dict) -> list[dict]:
+    """Tell each row whether this user can reverse it, and if not, why not.
+
+    The screen used to render nothing at all where the button would be, so an
+    operator looking at their own duplicate load saw no way to fix it and no
+    statement that one existed.
+    """
+
+    supervisor = has_permission(user, "txn.void")
+    for row in rows:
+        if supervisor:
+            row["can_void"] = not (row["voided"] or row["is_reversal"])
+            row["void_blocked"] = "" if row["can_void"] else "It has already been reversed."
+            continue
+        allowed, why = can_self_void(row, user)
+        row["can_void"] = allowed
+        row["void_blocked"] = "" if allowed else f"{why} Ask a supervisor to reverse it."
+    return rows
+
+
 def void(transaction_id: int, reason: str, user: dict, conn=None) -> dict:
     """Reverse a transaction with an offsetting entry. Never deletes."""
 
-    require_permission(user, "txn.void")
     original = get(transaction_id, conn)
+    if not has_permission(user, "txn.void"):
+        allowed, why = can_self_void(original, user)
+        if not allowed:
+            require_permission(user, "txn.void", subject=why.rstrip(".").lower())
     if original["voided"]:
         raise BusinessRuleError(
             f"Transaction {transaction_id} is already voided.", transaction_id=transaction_id
@@ -408,16 +588,28 @@ def void(transaction_id: int, reason: str, user: dict, conn=None) -> dict:
         db.update(
             "inventory_transaction", {"transaction_id": transaction_id}, {"voided": 1}, conn
         )
-        db.execute(
-            "UPDATE pending_shipment SET shipped = 1 WHERE transaction_id = ? AND shipped = 0",
-            (transaction_id,),
-            conn,
-        )
+        # Voiding a LOAD cancels the stage: the trailer was never loaded, so it
+        # must not appear on the ship list — and must not be recorded as
+        # shipped either. Voiding a SHIP puts the stage back on the list,
+        # because the trailer is still sitting at the dock.
+        if original["transaction_type"] == "LOAD":
+            db.execute(
+                "UPDATE pending_shipment SET cancelled = 1 WHERE transaction_id = ?",
+                (transaction_id,),
+                conn,
+            )
+        elif original["transaction_type"] == "SHIP" and original["parent_transaction_id"]:
+            db.execute(
+                "UPDATE pending_shipment SET shipped = 0 WHERE transaction_id = ? AND cancelled = 0",
+                (original["parent_transaction_id"],),
+                conn,
+            )
         audit.record(
             username=user["username"],
             action="void",
             entity="transaction",
             entity_id=transaction_id,
+            order_id=original["order_id"],
             summary=f"Voided transaction {transaction_id}",
             detail={"reason": reason, "reversal_id": reversal_id},
             conn=conn,
@@ -435,15 +627,23 @@ def pending_shipments(
         SELECT ps.stage_id, ps.order_id, ps.transaction_id, ps.trailer_number,
                ps.quantity, o.plant_id, p.code AS plant_code,
                c.name AS customer_name, t.to_bol AS bol_number,
+               t.user_id AS loaded_by_user_id, u.full_name AS loaded_by,
                m.number AS material_number, m.description AS material_description,
+               om.number AS order_material_number,
                t.transaction_date AS loaded_at
         FROM pending_shipment ps
         JOIN "order" o ON o.order_id = ps.order_id
         JOIN plant p ON p.plant_id = o.plant_id
         JOIN inventory_transaction t ON t.transaction_id = ps.transaction_id
+        JOIN app_user u ON u.user_id = t.user_id
         LEFT JOIN customer c ON c.customer_id = o.customer_id
-        LEFT JOIN material m ON m.material_id = o.material_one_id
-        WHERE ps.shipped = 0 AND t.voided = 0
+        -- The product on the trailer is the one that was loaded onto it, not
+        -- whatever the order header says. They are meant to agree; when they
+        -- do not, the BOL that leaves with the driver must show what is
+        -- actually on the truck.
+        LEFT JOIN material m ON m.material_id = t.from_material_id
+        LEFT JOIN material om ON om.material_id = o.material_one_id
+        WHERE ps.shipped = 0 AND ps.cancelled = 0 AND t.voided = 0
     """
     params: list[Any] = []
     if plant_id:
@@ -459,22 +659,39 @@ def ship(stage_id: int, user: dict, conn=None, user_date: str | None = None) -> 
     """Ship a loaded trailer: consume the staged quantity and close the stage."""
 
     require_permission(user, "txn.post")
-    stage = db.query_one(
-        """
-        SELECT ps.*, t.to_location_id, t.to_material_id, t.plant_id, t.to_bol
-        FROM pending_shipment ps
-        JOIN inventory_transaction t ON t.transaction_id = ps.transaction_id
-        WHERE ps.stage_id = ?
-        """,
-        (stage_id,),
-        conn,
-    )
+    stage = db.query_one("SELECT * FROM pending_shipment WHERE stage_id = ?", (stage_id,), conn)
     if stage is None:
         raise NotFound(f"Staged load {stage_id} was not found.")
-    if stage["shipped"]:
-        raise BusinessRuleError("That trailer has already shipped.", stage_id=stage_id)
 
     with db.transaction(conn):
+        # Claim the stage first, and let the UPDATE be the guard. Reading the
+        # flag and then acting on it is a race: two terminals, or one operator
+        # double-tapping a slow link, both read shipped = 0 and both ship the
+        # same trailer. `db.transaction` opens BEGIN IMMEDIATE, so exactly one
+        # of them gets the row.
+        claimed = db.affected(
+            "UPDATE pending_shipment SET shipped = 1"
+            " WHERE stage_id = ? AND shipped = 0 AND cancelled = 0",
+            (stage_id,),
+            conn,
+        )
+        if not claimed:
+            raise BusinessRuleError(
+                "That trailer has already shipped."
+                if stage["shipped"]
+                else "That load was voided, so there is nothing to ship.",
+                stage_id=stage_id,
+            )
+        stage = db.query_one(
+            """
+            SELECT ps.*, t.to_location_id, t.to_material_id, t.plant_id, t.to_bol
+            FROM pending_shipment ps
+            JOIN inventory_transaction t ON t.transaction_id = ps.transaction_id
+            WHERE ps.stage_id = ?
+            """,
+            (stage_id,),
+            conn,
+        )
         txn = post(
             "SHIP",
             {
@@ -492,18 +709,21 @@ def ship(stage_id: int, user: dict, conn=None, user_date: str | None = None) -> 
             user,
             conn,
         )
-        db.update("pending_shipment", {"stage_id": stage_id}, {"shipped": 1}, conn)
     return txn
 
 
-def bill_of_lading(order_id: int, conn=None) -> dict:
-    """Data for the BOL document the legacy ReportViewer printed."""
+def bill_of_lading(order_id: int, conn=None, transaction_id: int | None = None) -> dict:
+    """Data for the BOL document the legacy ReportViewer printed.
+
+    A bill of lading travels with one truck. Pass ``transaction_id`` and the
+    document covers that load alone; without it every load on the order is
+    listed, which is the order-level view and not what the driver carries.
+    """
 
     from . import orders as orders_service
 
     order = orders_service.get(order_id, conn)
-    loads = db.query(
-        """
+    sql = """
         SELECT t.transaction_id, t.to_bol AS bol_number, t.trailer_number, t.from_qty AS quantity,
                t.transaction_date, m.number AS material_number, m.description AS material_description,
                u.full_name AS loaded_by
@@ -512,17 +732,30 @@ def bill_of_lading(order_id: int, conn=None) -> dict:
         JOIN app_user u ON u.user_id = t.user_id
         LEFT JOIN material m ON m.material_id = t.from_material_id
         WHERE t.order_id = ? AND tt.code = 'LOAD' AND t.voided = 0
-        ORDER BY t.transaction_id
-        """,
-        (order_id,),
-        conn,
-    )
+    """
+    params: list[Any] = [order_id]
+    if transaction_id:
+        sql += " AND t.transaction_id = ?"
+        params.append(transaction_id)
+    loads = db.query(sql + " ORDER BY t.transaction_id", params, conn)
     qc_rows = db.query(
         "SELECT qc_id, sample_number, seal_number, bol_number, test_date"
         " FROM qc WHERE order_id = ? AND active = 1 ORDER BY qc_id DESC",
         (order_id,),
         conn,
     )
+    # The product printed on the document is the one on the truck. If a load
+    # went out under a different product from the order header, both are
+    # reported rather than quietly picking one.
+    products = []
+    seen: set[str] = set()
+    for load in loads:
+        number = load["material_number"] or ""
+        if number and number not in seen:
+            seen.add(number)
+            products.append(
+                {"number": number, "description": load["material_description"] or ""}
+            )
     return {
         "shipper": {
             "name": "FEED ENERGY COMPANY",
@@ -530,7 +763,13 @@ def bill_of_lading(order_id: int, conn=None) -> dict:
         },
         "order": order,
         "loads": loads,
+        "products": products,
+        "material_mismatch": bool(
+            products and order.get("material_one_number")
+            and {p["number"] for p in products} != {order["material_one_number"]}
+        ),
         "qc": qc_rows,
+        "single_load": bool(transaction_id),
         "total_quantity": round(sum(load["quantity"] for load in loads), 2),
     }
 

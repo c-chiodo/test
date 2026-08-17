@@ -256,7 +256,9 @@ def create_order(payload: dict = Body(...), user: dict = User) -> dict:
 @app.get("/api/orders/{order_id}", tags=["orders"])
 def get_order(order_id: int, user: dict = User) -> dict:
     order = orders.get(order_id)
-    order["transactions"] = inventory.activity(order_id=order_id, limit=200)
+    order["transactions"] = inventory.annotate_void_rights(
+        inventory.activity(order_id=order_id, limit=200), user
+    )
     order["qc"] = qc.list_for_order(order_id)
     order["qa_checklists"] = qc.qa_checklists(order_id)
     order["in_process"] = qc.in_process(order_id)
@@ -286,12 +288,12 @@ def close_orders(payload: dict = Body(...), user: dict = User) -> dict:
 
 @app.get("/api/orders/{order_id}/audit", tags=["orders"])
 def order_audit(order_id: int, user: dict = User) -> list[dict]:
-    return audit.for_entity("order", order_id)
+    return audit.for_order(order_id)
 
 
 @app.get("/api/orders/{order_id}/bol", tags=["shipping"])
-def bill_of_lading(order_id: int, user: dict = User) -> dict:
-    return inventory.bill_of_lading(order_id)
+def bill_of_lading(order_id: int, transaction_id: int | None = None, user: dict = User) -> dict:
+    return inventory.bill_of_lading(order_id, transaction_id=transaction_id)
 
 
 # --------------------------------------------------------------- inventory
@@ -342,16 +344,19 @@ def activity(
     limit: int = Query(default=500, le=5000),
     user: dict = User,
 ) -> list[dict]:
-    return inventory.activity(
-        plant_id=plant_id,
-        order_id=order_id,
-        location_id=location_id,
-        material_id=material_id,
-        operation=operation,
-        date_from=date_from,
-        date_to=date_to,
-        include_voided=include_voided,
-        limit=limit,
+    return inventory.annotate_void_rights(
+        inventory.activity(
+            plant_id=plant_id,
+            order_id=order_id,
+            location_id=location_id,
+            material_id=material_id,
+            operation=operation,
+            date_from=date_from,
+            date_to=date_to,
+            include_voided=include_voided,
+            limit=limit,
+        ),
+        user,
     )
 
 
@@ -496,8 +501,17 @@ def qa_checklists(order_id: int, user: dict = User) -> list[dict]:
 
 
 @app.post("/api/orders/{order_id}/qa-checklist", tags=["qc"], status_code=201)
-def save_qa_checklist(order_id: int, payload: dict = Body(...), user: dict = User) -> dict:
-    return qc.save_qa_checklist(order_id, payload, user)
+def save_qa_checklist(
+    order_id: int, stage: str | None = None, payload: dict = Body(...), user: dict = User
+) -> dict:
+    return qc.save_qa_checklist(order_id, payload, user, stage=stage)
+
+
+@app.get("/api/qa-questions", tags=["qc"])
+def qa_questions(stage: str | None = None, user: dict = User) -> list[dict]:
+    """The checklist questions, so a screen can ask the pre-load ones first."""
+
+    return qc.checklist_questions(stage)
 
 
 # ------------------------------------------------------------------- specs
@@ -512,7 +526,7 @@ def list_specs(
 
 @app.put("/api/specs", tags=["specs"])
 def upsert_spec(payload: dict = Body(...), user: dict = User) -> dict:
-    security.require_permission(user, "spec.read")
+    security.require_permission(user, "spec.write")
     result = specs.upsert_spec(
         material_id=int(payload["material_id"]),
         analyte=payload["analyte"],
@@ -535,7 +549,7 @@ def upsert_spec(payload: dict = Body(...), user: dict = User) -> dict:
 
 @app.put("/api/materials/{material_id}/tests", tags=["specs"])
 def set_tests(material_id: int, payload: dict = Body(...), user: dict = User) -> dict:
-    security.require_permission(user, "spec.read")
+    security.require_permission(user, "spec.write")
     analytes = specs.set_required_tests(material_id, payload.get("analytes", []))
     audit.record(
         username=user["username"],

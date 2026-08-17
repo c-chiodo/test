@@ -124,7 +124,7 @@ each, with what to do:
 |---|---|
 | Locations with a negative balance | a movement was posted against the wrong tank; void it |
 | Locations over stated capacity | the capacity on the location record is wrong, or a receipt was overstated |
-| Trailers loaded over 2 days ago and never shipped | the ship step was skipped in PIMS after the truck left |
+| Trailers loaded over 2 days ago and never shipped | the ship step was skipped in PIMS after the truck left — usually a kiosk sign-out mid-flow, which Load & ship now offers to resume |
 | Open orders past their due date | housekeeping |
 | QC records with no sample number | the LIMS result cannot be matched back to the load |
 | QC sample numbers with no LIMS result | either the sample was never logged in LabWare, or §4 |
@@ -139,10 +139,15 @@ Order detail → History                   # one order, with before/after values
 python -m pims audit --entity order --entity-id 329421
 ```
 
-Saving a QC record over an open warning is recorded, with the warnings that
-were showing. If people are routinely clicking through a validation prompt,
-that is visible instead of invisible — the failure mode the 2026 bug report
-warned about.
+**Order detail → History** covers the whole order, not just edits to the order
+row: its loads, ships, voids and QC records appear together, which is what the
+question is usually about.
+
+Saving a QC record over an out-of-spec result is refused until someone
+acknowledges it, and the acknowledgement is written onto the record along with
+the warnings that were showing at the time. If people are routinely clicking
+through a validation prompt, that is visible instead of invisible — the failure
+mode the 2026 bug report warned about.
 
 ## 9. Deploying
 
@@ -286,6 +291,33 @@ minutes idle.
 The PIN identifies who did the work in the audit trail. It is not a password:
 keep the terminal on the plant network, and use the full sign-in for anything
 outside the operator screens.
+
+Five failed attempts pause that account for five minutes. If an operator says
+they are locked out, either they have the wrong PIN or somebody has been
+guessing at their name; both are worth five minutes of waiting.
+
+The PIN can be tapped on the pad, typed on a keyboard, or sent by a badge
+scanner — the field takes all three.
+
+### An operator who was signed out mid-load
+
+The terminal signs itself out after three idle minutes. If that happens between
+posting a load and shipping it, the load is already real: product has left the
+tank, a BOL number is minted and the trailer is staged. Signing back in and
+opening **Load & ship** offers to resume, naming the trailer, the weight and the
+BOL. Nothing needs to be re-entered, and the truck must not be loaded again.
+
+If the operator instead starts a new flow, the staged trailer is still on the
+ship list, marked with who loaded it — and `health.data_quality` reports
+trailers loaded and never shipped.
+
+### An operator who made a mistake
+
+Operators can reverse their own posting for 12 hours, provided the trailer has
+not shipped: **Order detail → Activity → Void**, with a reason. Outside that
+window, or for somebody else's posting, the button is present but disabled and
+says why — the reason names the supervisor action rather than a permission
+string. Nothing is ever deleted; a void writes a reversing entry.
 
 ## 16. Integrations
 

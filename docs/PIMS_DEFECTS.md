@@ -181,3 +181,67 @@ From the troubleshooting section of `PIMS_User_Guide.docx` — documented as
 | "The test list doesn't match what's in LIMS — tell IT" | Freshness check reports source, age and test-code count without a ticket |
 | "Out-of-spec results aren't flagged — product limits may not be set" | The product-setup check counts products with no limits or no test list; Products & limits shows and edits them |
 | "Text filter returns nothing — remember % is the wildcard" | Still true (LIKE is LIKE), but the placeholder in the filter row says so |
+
+---
+
+## Defects found in the replacement, 2026-08-17
+
+The register above covers the legacy system. This section covers the
+replacement, and exists for the same reason: an undocumented defect is one that
+gets rediscovered by an operator at four in the morning.
+
+These were found by driving the running application the way a plant would —
+loading trucks, dropping the network mid-post, shipping the same trailer from
+two terminals, letting the kiosk time out mid-flow, and measuring the screens
+against WCAG 2.2 and the ISA-101 guidance for control-room displays. Every one
+is fixed, and every one has a test in `tests/test_pims_recovery.py` named after
+the mistake it guards against.
+
+### Wrong data
+
+| # | What went wrong | Cause | Fix |
+|---|---|---|---|
+| R-01 | A dropped connection after the server committed let the operator post the same load again. One truck, four loads, four BOL numbers, 4,936 lbs staged against 1,234 lbs of product. | `fetch` transport failures surfaced as the bare string "Failed to fetch" — no statement of whether the write landed — and `post()` had no way to recognise a retry. | `inventory_transaction.idempotency_key` with a unique index; the form mints one key and holds it until the post succeeds. A retry returns the transaction that already exists. The client now says the network dropped, that the write may have landed, and that pressing the button again is safe. |
+| R-02 | Five concurrent ships of one staged trailer: three succeeded. 15,000 lbs shipped against a 5,000 lb load, same BOL on all three. | `ship()` read `pending_shipment.shipped` and checked it *outside* the transaction it then opened. Each uvicorn worker thread has its own connection, so several read `shipped = 0`. | The claim is the guard: a conditional `UPDATE … WHERE shipped = 0` inside the transaction, which `BEGIN IMMEDIATE` serialises. Verified: 5 concurrent requests → 1 accepted, 4 refused, 1 SHIP row. |
+| R-03 | One MOVE turned 1,000 lbs of Acidulated Soapstock into 1,000 lbs of Cattle Blend. Another turned 1,000 lbs into 180,000 lbs. Both posted by an operator, both HTTP 201. | `post()` checked that materials and quantities were *present* and greater than zero, and never compared the two sides. | MOVE and LOAD must take out and put in the same product and the same weight. PRODUCE remains the one operation allowed to transmute or change yield, which is what producing is. The Plant floor form locks the To fields to the From values for those operations. |
+| R-04 | The staged-trailer list and the printed bill of lading named the product on the **order header**, not the product on the trailer. A load of Soapstock - Veg printed as All Veg HCFC. | `pending_shipments()` joined `material` through `o.material_one_id`. | The join goes through the transaction. The BOL prints the products actually loaded, and says so loudly when they disagree with the order. |
+| R-05 | Voiding a SHIP left the stage marked shipped, so the trailer standing at the dock could never be shipped again without a database edit. Voiding a LOAD marked the cancelled load as *shipped*. | One statement for every void: `UPDATE pending_shipment SET shipped = 1 WHERE transaction_id = ?`. | A `cancelled` column, so the two states stay apart. Voiding a LOAD cancels the stage; voiding a SHIP puts the trailer back on the list. |
+| R-06 | Fulfilment counted any material, so a load from the wrong tank showed the order progressing — one order reached 223% complete, 4,936 lbs of it the wrong product. Orders already fully loaded sat in "ready to load" showing "Left to load: 0". | `orders.progress` had no material filter; the picker clamped the remainder at zero. | Fulfilment counts only the ordered product. A load of anything else against a sales order is refused, naming both products. The remainder is signed, so "3,500 over" is visible. Loading past the ordered quantity asks for confirmation rather than proceeding in silence. |
+| R-07 | `POST /api/orders/{id}/qc` with `{"moisture": "abc", "ph": "7.2.1"}` returned 201 and an empty record, with a green "QC recorded". | `to_float` returns `None` for anything unparseable and `qc.save` wrote it through. | A non-empty value that will not parse is rejected by name. Blank is still blank — partial records are normal QC work. |
+| R-08 | An out-of-spec result could be saved without acknowledgement by anything other than the one screen that asked, and the record kept no trace of the sign-off. | The gate was client-side only. | The server refuses, and `qc.acknowledged_warnings` plus `warning_snapshot` put the sign-off and what it was signed against on the record. A *missing* reading stays advisory. |
+| R-09 | `PUT /api/specs` and `PUT /api/materials/{id}/tests` were gated on `spec.read`. A QC user widened an FFA limit from 65 to 999 and the failing result passed. | There was no `spec.write` permission. | There is now, and supervisors and admins hold it. |
+
+### Recovery
+
+| # | What went wrong | Fix |
+|---|---|---|
+| R-10 | Two identical **Ship** buttons on the Load & ship screen, and `ShipStep` was never told which trailer the flow had just loaded. Clicking the first one shipped somebody else's truck. | The step knows its own load. That row sorts first, is marked **this truck**, and is the only one with a primary button; shipping any other trailer names it and asks. The Plant floor ship list asks too. |
+| R-11 | The kiosk signs out after 180 idle seconds and every value in the flow lived in React state. The load was already committed — product gone, BOL minted, stage waiting — and the operator came back to an empty screen and loaded the truck again. | The flow is kept in `sessionStorage` and rehydrated on mount, with a banner naming the trailer, the weight and the BOL, and whether it shipped. The sign-out itself now says what happened and that nothing was lost. |
+| R-12 | An operator could not reverse their own mistake and was told only `Your role (operator) cannot txn void.` The Activity screen rendered nothing at all where the button would be. | An operator may reverse their own posting for 12 hours, provided it has not shipped. Where they may not, the button is present and disabled with the reason beside it. Refusals name the action in plain words and who to ask. |
+| R-13 | The bill of lading printed every load on the order and totalled them; printing produced the whole application — sidebar, nav, toasts and all. | The BOL takes a transaction and covers that truck. A print stylesheet reduces the page to the document. |
+| R-14 | Four of the six checklist questions inspect an *empty* trailer, and all six were asked after the load. | Questions carry a stage. The trailer check is step 2, before the load, and the load is blocked until it is answered. Seals and load temperature are asked after. |
+| R-15 | "N/A" on a checklist left no trace, and text and numeric questions had no way to answer N/A at all — the only way past a question that did not apply was to invent a value. | N/A is available on every question type and is reported separately from exceptions, so "checked, does not apply" is distinguishable from "never asked". |
+| R-16 | The QC banner promised seven tests on a form with six fields. | The banner separates what is typed here from what comes back from the lab. |
+| R-17 | The order History tab was empty for every order, including one carrying four duplicate loads. | `audit_log.order_id`, and the history returns the order's loads, ships, voids and QC together. |
+| R-18 | Field-level errors printed database column names: `from_material_id: Choose the material being taken.` | They print the label the form uses. |
+| R-19 | `ADJUST` and `SHRINK` — the two operations that change the books with nothing physically moving — needed no reason. | Both do. |
+
+### Plant floor and accessibility
+
+| # | What went wrong | Fix |
+|---|---|---|
+| R-20 | `body.kiosk` was applied inside `Shell`, which only mounts after sign-in — so the PIN screen, the one screen every operator touches at shift change with gloves on, rendered at desktop density. | Applied in `Session`, before the sign-in screen renders. |
+| R-21 | `Kiosk.tsx` contained no `<input>` at all, despite a comment claiming a scanner or keypad could type the PIN. Anyone without a working touchscreen, or using assistive technology, could not sign in. | A real labelled field, focused on arrival, that a keyboard, a badge scanner and a screen reader can all use. The pad writes into it. |
+| R-22 | No throttling on PIN attempts. A four-digit PIN is 10,000 guesses and a kiosk sits in a yard. | Five failures pause the account for five minutes, on PINs and passwords alike. |
+| R-23 | Auto-submit at four digits would have burned an attempt on a half-typed longer PIN once throttling existed. | Explicit Sign in. |
+| R-24 | `.scan input:focus { outline: none }` removed the focus ring from the barcode target. | Restored, on the wrapper and the field. |
+| R-25 | Checkboxes rendered at the browser default of 13 px — including "I have reviewed this out-of-spec result" — and the checklist Yes/No/N/A buttons sat 6 px apart. | 22 px controls in 44 px rows; answers 14 px apart with a 76 px minimum width, and larger again in kiosk mode. |
+| R-26 | `--text-3` carried field hints at 3.05:1, including the "On hand" line that stops a tank being over-drawn. `--warn` and `--ok` failed against their own soft backgrounds. White on the dark theme's light brand and accent colours measured 2.2–2.7:1. | Every pair measured and corrected: hints 4.6:1, accents 5.5–6.6:1 on their own backgrounds, and an `--on-accent` token that flips with the theme (7.1:1 and 8.5:1 in dark). |
+| R-27 | Kiosk scaling stopped at buttons, inputs, labels, cells and steps — hints, badges, chips, alerts and toasts, which is where the explanations live, stayed at desktop size. | All of them scale. |
+
+### Not a code defect: the demo dataset
+
+The seed loaded every sales order to its full quantity, so "Sales orders ready
+to load" was a screen of orders with nothing left to load. Roughly half of the
+open sales orders now carry a partial load, which is what a loadout screen
+looks at for most of a shift.

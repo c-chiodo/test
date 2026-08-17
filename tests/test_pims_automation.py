@@ -440,7 +440,10 @@ def test_a_scale_reading_is_offered_once_then_consumed(conn, admin_user, sales_o
         "RECEIVE",
         {
             "plant_id": 1,
-            "to_location_id": _location("DM-T108", conn),
+            # The receiving bay rather than a tank: this test is about the
+            # weight being consumed, and it should not fail on the day the
+            # seeded tank happens to be nearly full.
+            "to_location_id": _location("DM-RECV-TRUCK", conn),
             "to_material_id": material,
             "to_qty": 25_000,
             "scale_reading_id": reading["reading_id"],

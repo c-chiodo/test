@@ -133,12 +133,26 @@ function Session() {
       .finally(() => setChecking(false))
   }, [])
 
-  const signOut = useCallback(() => { tokenStore.clear(); setUser(null) }, [])
+  const [signedOutReason, setSignedOutReason] = useState('')
+  const signOut = useCallback((reason = '') => {
+    tokenStore.clear()
+    setSignedOutReason(reason)
+    setUser(null)
+  }, [])
+
+  // The kiosk body class has to be on before the *sign-in* screen renders, not
+  // after. It used to be applied inside Shell, which only mounts once someone
+  // is signed in — so the one screen every operator touches at shift change,
+  // with gloves on, was laid out at desktop density.
+  useEffect(() => {
+    document.body.classList.toggle('kiosk', kiosk)
+    return () => document.body.classList.remove('kiosk')
+  }, [kiosk])
 
   if (checking) return <div className="login"><Loading label="Signing in…" /></div>
   if (!user) {
     return kiosk
-      ? <Kiosk onSignedIn={setUser} />
+      ? <Kiosk onSignedIn={setUser} signedOutReason={signedOutReason} />
       : <Login onSignedIn={setUser} error={error} />
   }
   return (
@@ -181,7 +195,7 @@ function Shell({
 }: {
   user: User
   kiosk: boolean
-  onSignOut: () => void
+  onSignOut: (reason?: string) => void
   onExitKiosk: () => void
   onEnterKiosk: () => void
 }) {
@@ -199,11 +213,6 @@ function Shell({
   const [health, setHealth] = useState<{ environment: string } | null>(null)
 
   useEffect(() => {
-    document.body.classList.toggle('kiosk', kiosk)
-    return () => document.body.classList.remove('kiosk')
-  }, [kiosk])
-
-  useEffect(() => {
     api.get<Reference>(`/api/reference?plant_id=${plantId}`)
       .then((data) => { setReference(data); setReferenceError(null) })
       .catch(setReferenceError)
@@ -216,11 +225,19 @@ function Shell({
     setPlantIdState(id)
   }, [])
 
-  const logout = useCallback(() => {
-    api.post('/api/auth/logout').catch(() => undefined).finally(onSignOut)
+  const logout = useCallback((reason = '') => {
+    api.post('/api/auth/logout').catch(() => undefined).finally(() => onSignOut(reason))
   }, [onSignOut])
 
-  const idleRemaining = useIdleSignOut(kiosk, KIOSK_IDLE_SECONDS, logout)
+  const idleTimeout = useCallback(() => {
+    logout(
+      'The terminal signed out after three minutes with nobody touching it. '
+      + 'Nothing you had entered was lost — sign back in and Load & ship will '
+      + 'pick up where you left off.',
+    )
+  }, [logout])
+
+  const idleRemaining = useIdleSignOut(kiosk, KIOSK_IDLE_SECONDS, idleTimeout)
 
   const can = useCallback(
     (permission: string) =>
@@ -301,7 +318,7 @@ function Shell({
             <span className={`timer${idleRemaining <= 30 ? ' soon' : ''}`}>
               signs out in {Math.floor(idleRemaining / 60)}:{String(idleRemaining % 60).padStart(2, '0')}
             </span>
-            <button className="sm" onClick={logout}>Sign out</button>
+            <button className="sm" onClick={() => logout()}>Sign out</button>
             <button className="ghost sm" onClick={onExitKiosk} title="Return to the full application">
               Exit kiosk
             </button>
@@ -341,7 +358,7 @@ function Shell({
             <button className="ghost sm" onClick={onEnterKiosk} title="Shared plant terminal mode">
               Kiosk
             </button>
-            <button className="ghost sm" onClick={logout}>Sign out</button>
+            <button className="ghost sm" onClick={() => logout()}>Sign out</button>
           </header>
         )}
 

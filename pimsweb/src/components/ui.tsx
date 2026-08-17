@@ -313,6 +313,29 @@ export function Loading({ label = 'Loading…' }: { label?: string }) {
   )
 }
 
+/* Field keys are database column names. They are the right key for a form to
+ * match an error to an input, and the wrong thing to read out to an operator —
+ * "from_material_id: Choose the material being taken." names a column nobody
+ * on the floor has heard of. These are the labels the forms already use. */
+const FIELD_LABELS: Record<string, string> = {
+  from_location_id: 'From tank', from_material_id: 'Product', from_qty: 'Quantity',
+  from_bol: 'BOL number', to_location_id: 'To location', to_material_id: 'To product',
+  to_qty: 'Quantity in', to_bol: 'BOL number', trailer_number: 'Trailer #',
+  plant_id: 'Plant', order_id: 'Order', department_id: 'Department',
+  user_date: 'Transaction date', remarks: 'Reason', reason: 'Reason',
+  tank_hours: 'Tank time', employee_hours: 'Labor', responses: 'Unanswered',
+  moisture: 'Moisture', temp: 'Temperature', ph: 'pH', ffa: 'FFA', tfa: 'TFA',
+  spintest_fallout: 'Spintest', flash_pf: 'Flash', sample_number: 'Sample #',
+  seal_number: 'Seals', material_one_id: 'Product', material_one_quantity: 'Quantity',
+  customer_id: 'Customer', vendor_id: 'Vendor', due_date: 'Due date',
+  order_date: 'Order date', order_type_id: 'Order type', status_id: 'Status',
+}
+
+export function fieldLabel(field: string): string {
+  return FIELD_LABELS[field]
+    ?? field.replace(/_id$/, '').replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase())
+}
+
 export function ErrorBox({ error }: { error: unknown }) {
   const err = error as { message?: string; correlationId?: string; fields?: Record<string, string> }
   if (!err) return null
@@ -322,7 +345,7 @@ export function ErrorBox({ error }: { error: unknown }) {
       {fields && (
         <ul style={{ margin: '6px 0 0 16px', padding: 0 }}>
           {Object.entries(fields).map(([field, message]) => (
-            <li key={field}><strong>{field}</strong>: {message}</li>
+            <li key={field}><strong>{fieldLabel(field)}</strong>: {message}</li>
           ))}
         </ul>
       )}

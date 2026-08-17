@@ -54,6 +54,17 @@ export function setNoticeSink(sink: (title: string, body?: string) => void): voi
   noticeSink = sink
 }
 
+/** A key identifying one attempt at one write.
+ *
+ * Held by the form until the write succeeds, so a retry after a dropped
+ * connection carries the same key and the server returns the row it already
+ * wrote instead of writing a second one. */
+export function newKey(): string {
+  const cryptoApi = globalThis.crypto as Crypto | undefined
+  if (cryptoApi?.randomUUID) return cryptoApi.randomUUID()
+  return `k-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 const TOKEN_KEY = 'pims.token'
 
 export const token = {
@@ -77,11 +88,28 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
   if (current) headers.Authorization = `Bearer ${current}`
   if (body !== undefined) headers['Content-Type'] = 'application/json'
 
-  const response = await fetch(path, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  })
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method,
+      headers,
+      body: body === undefined ? undefined : JSON.stringify(body),
+    })
+  } catch {
+    // A transport failure is a raw TypeError with the message "Failed to
+    // fetch", which tells an operator nothing and — worse — says nothing
+    // about whether the write landed. On the plant Wi-Fi it usually did.
+    throw new ApiError(0, {
+      code: 'network',
+      message:
+        method === 'GET'
+          ? 'PIMS could not be reached. Check the network and try again.'
+          : 'The network dropped before PIMS answered, so this may or may not ' +
+            'have gone through. Check before doing it again — pressing the ' +
+            'button a second time is safe, it will not post twice.',
+      detail: { method, path },
+    })
+  }
 
   if (response.status === 204) return undefined as T
 

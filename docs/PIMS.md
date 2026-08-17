@@ -100,6 +100,20 @@ mechanical — `Order`, `Order_QC`, `Transaction`, `Material`, `Location`,
 The inventory ledger is append-only. A mistake is corrected by voiding, which
 writes a reversing entry and marks the original; both stay visible and both
 count toward the balance, so history reconciles instead of quietly changing.
+Operators can reverse their own postings for twelve hours, provided the trailer
+has not shipped — needing a supervisor for every slip is what turns a
+thirty-second correction into a load that never gets corrected at all.
+
+Three invariants are enforced in `post()` rather than left to the screens:
+
+- a move or a load takes out and puts in the **same product** and the **same
+  weight** — `PRODUCE` is the one operation allowed to transmute or change
+  yield, because that is what producing means;
+- a load against a sales order must be **the product the order is for**, and
+  fulfilment counts only that product;
+- a write carrying an `idempotency_key` that has already been used returns the
+  transaction it made rather than making a second one, so a retry after a
+  dropped connection cannot load the same truck twice.
 
 ## Screen parity with the legacy client
 
@@ -127,7 +141,7 @@ count toward the balance, so history reconciles instead of quietly changing.
 | Change Plant | Plant switcher in the top bar | |
 | "You are in the TEST environment" | Environment badge in the top bar | |
 | Customers / Materials / Requirements | **Products & limits**, requirements shown on the order | Master data still originates in Great Plains |
-| — | **Load & ship** | New: load → QC → checklist → BOL in one flow, pre-filled |
+| — | **Load & ship** | New: trailer check → load → QC → sign-off → BOL in one flow, pre-filled, and resumable after a sign-out |
 | — | Kiosk mode | New: PIN sign-in, touch layout and idle sign-out for a shared plant terminal |
 | — | Scan box | New: one box resolves an order, sample, BOL, tank, product or trailer |
 | — | **Support console** | New: health, data quality, alerts, scheduled jobs, audit trail, failures |
@@ -149,6 +163,9 @@ watches what nobody was watching, and never decides something a person should.
   to a webhook, and recorded either way.
 - **Scheduled jobs** close finished orders, raise standing orders, pull LIMS
   results and GP master data, and mail a daily digest.
+- **A flow in progress survives a sign-out.** A kiosk signs itself out after
+  three idle minutes; Load & ship comes back offering to resume, naming the
+  trailer, the weight and the BOL, so the truck does not get loaded twice.
 
 Every one of these is a setting away from being turned off, and every job runs
 with `--dry-run` first. See [PIMS_RUNBOOK.md](PIMS_RUNBOOK.md) §12–16.

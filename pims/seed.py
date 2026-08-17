@@ -265,13 +265,16 @@ VENDORS = [
     ("V-1355", "GREAT RIVER SOY", "Muscatine", "IA"),
 ]
 
+# The stage matters: four of these inspect an *empty* trailer, and asking them
+# after the product is aboard makes them a formality. `pre_load` questions are
+# asked before the load posts and block it; the rest are asked after.
 QA_QUESTIONS = [
-    (1, "Trailer interior clean, dry and free of odor?", "yesno", 10),
-    (2, "Previous load compatible with this product?", "yesno", 20),
-    (3, "Seals applied and recorded on the BOL?", "yesno", 30),
-    (4, "Hoses capped and wash ticket present?", "yesno", 40),
-    (5, "Driver provided wash ticket number", "text", 50),
-    (6, "Product temperature at load (°F)", "number", 60),
+    (1, "Trailer interior clean, dry and free of odor?", "yesno", "pre_load", 10),
+    (2, "Previous load compatible with this product?", "yesno", "pre_load", 20),
+    (3, "Hoses capped and wash ticket present?", "yesno", "pre_load", 30),
+    (4, "Driver provided wash ticket number", "text", "pre_load", 40),
+    (5, "Seals applied and recorded on the BOL?", "yesno", "post_load", 50),
+    (6, "Product temperature at load (°F)", "number", "post_load", 60),
 ]
 
 TEST_POINTS = [
@@ -384,13 +387,14 @@ def _seed_reference(conn) -> None:
             },
             conn,
         )
-    for qid, question, answer_type, order_ in QA_QUESTIONS:
+    for qid, question, answer_type, stage, order_ in QA_QUESTIONS:
         db.insert(
             "qa_question",
             {
                 "question_id": qid,
                 "question": question,
                 "answer_type": answer_type,
+                "stage": stage,
                 "sort_order": order_,
             },
             conn,
@@ -798,16 +802,23 @@ def _seed_activity(conn, rng, material_ids, tanks_by_plant, user_ids) -> None:
                 else:
                     trailer_loc = loc(plant_id, "TRAILER")
                     trailer = str(rng.randrange(100, 999))
+                    # Open orders are not all loaded to the last pound. Roughly
+                    # half of them have a truck still to go, which is what a
+                    # loadout screen is looking at for most of a shift — and
+                    # what the demo used to have none of.
+                    load_qty = qty
+                    if not closed and rng.random() < 0.55:
+                        load_qty = round(qty * rng.uniform(0.3, 0.7), 1)
                     txn = write(
                         {
                             **base,
                             "transaction_type_id": 4,
                             "from_material_id": material_id,
                             "from_location_id": tank,
-                            "from_qty": qty,
+                            "from_qty": load_qty,
                             "to_material_id": material_id,
                             "to_location_id": trailer_loc,
-                            "to_qty": qty,
+                            "to_qty": load_qty,
                             "trailer_number": trailer,
                             "to_bol": f"001-{rng.randrange(111_000, 111_999)}-1",
                         }
@@ -819,7 +830,7 @@ def _seed_activity(conn, rng, material_ids, tanks_by_plant, user_ids) -> None:
                             "order_id": order_id,
                             "transaction_id": txn,
                             "trailer_number": trailer,
-                            "quantity": qty,
+                            "quantity": load_qty,
                             "shipped": 1 if shipped else 0,
                         },
                         conn,
@@ -835,7 +846,7 @@ def _seed_activity(conn, rng, material_ids, tanks_by_plant, user_ids) -> None:
                                 "user_date": ship_time.date().isoformat(),
                                 "from_material_id": material_id,
                                 "from_location_id": trailer_loc,
-                                "from_qty": qty,
+                                "from_qty": load_qty,
                                 "trailer_number": trailer,
                                 "remarks": "Shipped",
                             }
@@ -965,8 +976,12 @@ def _seed_qc(conn, rng, *, order_id, plant_id, material_number, material_id, sta
             },
             conn,
         )
-        for qid, _q, answer_type, _o in QA_QUESTIONS:
-            if answer_type == "yesno":
+        for qid, _q, answer_type, _stage, _o in QA_QUESTIONS:
+            if rng.random() < 0.05:
+                # Some questions genuinely do not apply — a tank wagon with no
+                # hoses to cap. Seeded so the N/A path has data behind it.
+                response = "N/A"
+            elif answer_type == "yesno":
                 response = "Yes" if rng.random() < 0.94 else "No"
             elif answer_type == "number":
                 response = str(round(rng.uniform(100, 135), 1))

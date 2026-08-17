@@ -13,21 +13,29 @@
 
   --text: #16202e;
   --text-2: #55627a;
-  --text-3: #8a94a8;
+  /* 4.6:1 on --surface. It was #8a94a8 at 3.05:1, which is below the 4.5:1
+     floor — and it is the colour every field hint uses, including the "On
+     hand: 27,941 lbs" line that stops an operator over-drawing a tank. */
+  --text-3: #6b7688;
 
   --brand: #1f4e79;
   --brand-2: #2f6fa8;
   --brand-ink: #ffffff;
   --brand-soft: #e8f0f8;
 
-  --ok: #1a7f4b;
+  /* Each accent is measured against its own -soft background, because that is
+     the pairing the badges and alerts actually render: 6.6:1, 5.5:1, 5.6:1. */
+  --ok: #136139;
   --ok-soft: #e4f4ec;
-  --warn: #a86a08;
+  --warn: #8a5606;
   --warn-soft: #fdf1dd;
   --danger: #b3261e;
   --danger-soft: #fbe9e7;
   --info: #26547c;
   --info-soft: #e7eff7;
+  /* Text drawn on top of a filled accent. White works on the light palette;
+     the dark palette's accents are light, so it flips. */
+  --on-accent: #ffffff;
 
   --radius: 10px;
   --radius-sm: 6px;
@@ -53,7 +61,7 @@
 
     --text: #e8edf5;
     --text-2: #a9b4c6;
-    --text-3: #78849a;
+    --text-3: #98a3b6;
 
     --brand: #4f8fc4;
     --brand-2: #6ba5d6;
@@ -68,6 +76,7 @@
     --danger-soft: #331816;
     --info: #7fb0dd;
     --info-soft: #16232f;
+    --on-accent: #0d1219;
 
     --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
     --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
@@ -134,7 +143,7 @@ a { color: var(--brand-2); }
   color: #c2d0e0; text-decoration: none; font-size: 13.5px;
 }
 .nav a:hover { background: rgba(255, 255, 255, 0.06); color: #fff; }
-.nav a.active { background: var(--brand-2); color: #fff; font-weight: 550; }
+.nav a.active { background: var(--brand-2); color: var(--on-accent); font-weight: 550; }
 .nav a .icon { width: 18px; text-align: center; opacity: 0.9; }
 .nav a .count {
   margin-left: auto; font-size: 11px; background: rgba(255,255,255,0.14);
@@ -237,7 +246,7 @@ button.primary {
   font-weight: 550;
 }
 button.primary:hover:not(:disabled) { background: var(--brand-2); border-color: var(--brand-2); }
-button.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
+button.danger { background: var(--danger); border-color: var(--danger); color: var(--on-accent); }
 button.ghost { background: transparent; border-color: transparent; color: var(--text-2); }
 button.ghost:hover:not(:disabled) { background: var(--surface-3); color: var(--text); }
 button.sm { padding: 4px 9px; font-size: 12.5px; }
@@ -429,7 +438,11 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   border: none; background: transparent; padding: 3px 0;
   font-size: 13px; width: 100%;
 }
+/* The scan box is the one control a barcode gun aims at; taking its focus
+   ring away meant nobody could tell whether a scan would land here. */
+.scan:focus-within { border-color: var(--brand-2); box-shadow: 0 0 0 3px var(--brand-soft); }
 .scan input:focus { outline: none; }
+.scan input:focus-visible { outline: 2px solid var(--brand-2); outline-offset: 2px; }
 .scan .hintkey {
   font-size: 10.5px; color: var(--text-3); border: 1px solid var(--border);
   border-radius: 4px; padding: 0 4px; background: var(--surface);
@@ -467,9 +480,9 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   background: var(--surface-3); color: var(--text-2);
 }
 .steps .step.active { border-color: var(--brand-2); color: var(--text); font-weight: 600; }
-.steps .step.active .n { background: var(--brand-2); color: #fff; }
+.steps .step.active .n { background: var(--brand-2); color: var(--on-accent); }
 .steps .step.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
-.steps .step.done .n { background: var(--ok); color: #fff; }
+.steps .step.done .n { background: var(--ok); color: var(--on-accent); }
 
 .step-actions {
   display: flex; gap: 8px; justify-content: space-between;
@@ -532,3 +545,87 @@ body.kiosk h1 { font-size: 24px; }
   font-size: 34px; line-height: 1.1;
 }
 .readout .unit { font-size: 15px; font-weight: 500; color: var(--text-2); margin-left: 6px; }
+
+/* ------------------------------------------------- touch and keyboard */
+
+/* Every target a gloved hand aims at gets 44px, the size a finger actually
+   is. Checkboxes were rendering at the browser default of 13px, which is
+   smaller than the tip of a pen — and one of them is the "I have reviewed
+   this out-of-spec result" box. */
+input[type="checkbox"], input[type="radio"] {
+  width: 22px; height: 22px; accent-color: var(--brand-2);
+  flex: 0 0 auto; margin: 0;
+}
+label.check { min-height: 44px; align-items: center; cursor: pointer; }
+
+/* Adjacent answers need space between them, not a shared edge: 6px apart,
+   Yes and No are one slip of a glove from each other. */
+.qa-question {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 20px; flex-wrap: wrap;
+  padding: 10px 0; border-bottom: 1px solid var(--border);
+}
+.qa-question:last-child { border-bottom: none; }
+.qa-answers { display: flex; gap: 14px; flex-wrap: nowrap; }
+.qa-answers button { min-width: 76px; min-height: 44px; justify-content: center; }
+
+/* Visible to a screen reader, not to the eye. */
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* A statement of what just happened — a kiosk sign-out, most often. */
+.notice {
+  background: var(--info-soft); border: 1px solid color-mix(in srgb, var(--info) 30%, transparent);
+  color: var(--info); border-radius: var(--radius);
+  padding: 12px 14px; margin-bottom: 14px; font-size: 14px;
+}
+
+/* Focus has to be visible on a shared terminal where the pointer may be a
+   finger, a mouse or a scanner. */
+:focus-visible { outline: 2px solid var(--brand-2); outline-offset: 2px; }
+
+.pin-submit { width: 100%; max-width: 300px; margin-top: 12px; justify-content: center; }
+.pin-display {
+  width: 100%; max-width: 300px; border: 1px solid var(--border-strong);
+  border-radius: 12px; background: var(--surface);
+}
+
+/* ------------------------------------------- kiosk: the rest of the app */
+
+/* The kiosk scale used to stop at buttons, inputs, labels, cells and steps,
+   so hints, badges, chips and alerts — every piece of text that explains
+   what is going on — stayed at desktop size on a screen viewed from arm's
+   length. */
+body.kiosk .field .hint, body.kiosk .field .error { font-size: 13.5px; }
+body.kiosk .small, body.kiosk .muted.small { font-size: 13.5px; }
+body.kiosk .badge { font-size: 13px; padding: 3px 10px; }
+body.kiosk .why span { font-size: 13.5px; padding: 4px 12px; }
+body.kiosk .alert { font-size: 15px; }
+body.kiosk .alert .title { font-size: 16px; }
+body.kiosk .toast { font-size: 15px; }
+body.kiosk .notice { font-size: 16px; }
+body.kiosk .qa-question { font-size: 17px; padding: 14px 0; }
+body.kiosk .qa-answers button { min-width: 92px; min-height: 56px; font-size: 18px; }
+body.kiosk input[type="checkbox"], body.kiosk input[type="radio"] { width: 28px; height: 28px; }
+body.kiosk .pinpad button { min-height: 68px; }
+
+/* ----------------------------------------------------------- printing */
+
+/* A bill of lading is a document that leaves the site with a driver. Printing
+   the application around it — sidebar, nav, toasts, buttons — is not a
+   document, and it is what came out of the printer before this block. */
+@media print {
+  .sidebar, .topbar, .kiosk-bar, .toasts, .scan, .steps,
+  .page-head .actions, .step-actions, button { display: none !important; }
+  .app, .content { display: block; padding: 0; margin: 0; background: #fff; }
+  .card { border: none; box-shadow: none; padding: 0; break-inside: avoid; }
+  .grid, .grid.cols-2 { display: block; }
+  /* Only the document, at full width. */
+  .card:not(:has(.printable)) { display: none; }
+  .printable { display: block; color: #000; }
+  .printable .kv { font-size: 12pt; }
+  body { background: #fff; color: #000; font-size: 12pt; }
+  a[href]::after { content: ""; }
+}

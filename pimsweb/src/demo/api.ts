@@ -46,7 +46,7 @@ const ROLE_PERMISSIONS: Record<string, string[]> = {
   qc: ['order.read', 'txn.read', 'qc.read', 'qc.write', 'query.run', 'spec.read'],
   supervisor: [
     'order.read', 'order.write', 'order.close', 'txn.read', 'txn.post', 'txn.void',
-    'qc.read', 'qc.write', 'query.run', 'spec.read', 'support.read',
+    'qc.read', 'qc.write', 'query.run', 'spec.read', 'spec.write', 'support.read',
   ],
   admin: ['*'],
 }
@@ -80,11 +80,26 @@ function can(user: Row, permission: string): boolean {
   return granted.includes('*') || granted.includes(permission)
 }
 
+/** Plain-language names for permissions, and who to ask. */
+const PERMISSION_HELP: Record<string, [string, string]> = {
+  'txn.void': ['void a transaction', 'a supervisor'],
+  'order.write': ['edit an order', 'a supervisor'],
+  'order.close': ['close an order', 'a supervisor'],
+  'qc.write': ['record QC', 'QC or a supervisor'],
+  'spec.write': ['change product limits', 'an administrator'],
+  'support.read': ['open the support console', 'a supervisor'],
+}
+
+function hasPermission(user: Row, permission: string): boolean {
+  return can(user, permission)
+}
+
 function requirePermission(user: Row, permission: string): void {
-  if (!can(user, permission)) {
-    fail(403, 'forbidden',
-      `Your role (${user.role}) cannot ${permission.replace('.', ' ')}.`, { permission })
-  }
+  if (can(user, permission)) return
+  // A refusal that only quotes the permission string leaves an operator stuck.
+  const [action, ask] = PERMISSION_HELP[permission] ?? [permission.replace('.', ' '), 'a supervisor']
+  fail(403, 'forbidden',
+    `Your role (${user.role}) cannot ${action}. Ask ${ask} to do it.`, { permission, ask, action })
 }
 
 function requirePlant(user: Row, plantId: number): void {
@@ -97,12 +112,19 @@ function requirePlant(user: Row, plantId: number): void {
 
 /* ----------------------------------------------------------------- audit */
 
-function audit(action: string, entity: string, entityId: any, summary: string, detail: Row = {}): void {
+/** `orderId` is the order this change belongs to, whatever entity it was
+ *  recorded against — a transaction and a QC record are events in an order's
+ *  life, and the order's history screen is where a supervisor goes looking. */
+function audit(
+  action: string, entity: string, entityId: any, summary: string,
+  detail: Row = {}, orderId: number | null = null,
+): void {
   store.audit_log.push({
     audit_id: store.audit_log.length + 1,
     occurred_at: nowIso(),
     username: session?.username ?? 'system',
-    action, entity, entity_id: String(entityId), summary, detail,
+    action, entity, entity_id: String(entityId), order_id: orderId ?? null,
+    summary, detail,
   })
 }
 
@@ -320,6 +342,13 @@ function postTransaction(operation: string, payload: Row): Row {
   const spec = OPERATIONS[op]
   if (!spec) return invalid(`${op} is not an inventory operation.`, { operation: 'Unknown operation.' })
 
+  // A retry after a lost answer carries the key of the attempt it is retrying.
+  const idempotencyKey = String(payload.idempotency_key ?? '').trim()
+  if (idempotencyKey) {
+    const already = store.inventory_transaction.find((t) => t.idempotency_key === idempotencyKey)
+    if (already) return hydrateTransaction(already)
+  }
+
   const fields: Record<string, string> = {}
   let plantId = payload.plant_id ? Number(payload.plant_id) : null
   const orderId = payload.order_id ? Number(payload.order_id) : null
@@ -358,6 +387,21 @@ function postTransaction(operation: string, payload: Row): Row {
   if (op === 'MOVE' && fromLocationId && fromLocationId === toLocationId) {
     fields.to_location_id = 'From and to locations must differ.'
   }
+  // Move and load relocate product; only Produce may change what it is or how
+  // much there is. Mirrors `pims/services/inventory.py`.
+  if ((op === 'MOVE' || op === 'LOAD') && Object.keys(fields).length === 0) {
+    if (fromMaterialId !== toMaterialId) {
+      fields.to_material_id = `A ${spec.label.toLowerCase()} moves product, it cannot change it. `
+        + 'Take out and put in the same product.'
+    } else if (Math.abs(fromQty - toQty) > 0.01) {
+      fields.to_qty = `${Math.round(fromQty).toLocaleString()} lbs out but `
+        + `${Math.round(toQty).toLocaleString()} lbs in. A move cannot create or lose `
+        + 'product — use Shrinkage or an Adjustment for that.'
+    }
+  }
+  if ((op === 'ADJUST' || op === 'SHRINK') && !String(payload.remarks ?? '').trim()) {
+    fields.remarks = 'Say why the count is being changed.'
+  }
   if (Object.keys(fields).length) invalid('This transaction cannot be posted.', fields)
 
   const locations = byId.location()
@@ -373,6 +417,44 @@ function postTransaction(operation: string, payload: Row): Row {
         payload = { ...payload, to_bol: nextBol(payload.trailer_number) }
       } else {
         invalid(`${location.number} requires a BOL number.`, { to_bol: 'Enter the BOL number.' })
+      }
+    }
+  }
+
+  if (op === 'LOAD' && order && order.material_one_id) {
+    // A load must be of the product the order is for. Fulfilment used to count
+    // any material, so loading the wrong tank both put the wrong feed on the
+    // truck and marked the order as progressing.
+    if (fromMaterialId && fromMaterialId !== order.material_one_id) {
+      const wanted = byId.material().get(order.material_one_id)
+      const loading = byId.material().get(fromMaterialId)
+      refuse(
+        `Order ${order.order_id} is for ${wanted?.number} ${wanted?.description}, but this `
+        + `load is ${loading?.number} ${loading?.description}. Check the tank, or post this `
+        + 'against the right order.',
+        { order_id: order.order_id, expected: wanted?.number, loading: loading?.number },
+      )
+    }
+    // Loading past the ordered quantity is possible, but never by accident.
+    if (!payload.acknowledge_over_load) {
+      const ordered = order.material_one_quantity || 0
+      const already = progress(order).qty_fulfilled
+      const over = already + fromQty - ordered
+      if (ordered && over > 0.01) {
+        refuse(
+          `Order ${order.order_id} is for ${Math.round(ordered).toLocaleString()} lbs and `
+          + `${Math.round(already).toLocaleString()} lbs are already loaded. This load puts it `
+          + `${Math.round(over).toLocaleString()} lbs over. Confirm to post it anyway, or check `
+          + 'whether this belongs on another order.',
+          {
+            rule: 'over_fulfilment',
+            order_id: order.order_id,
+            ordered: Math.round(ordered),
+            already_loaded: Math.round(already),
+            over_by: Math.round(over),
+            acknowledge_field: 'acknowledge_over_load',
+          },
+        )
       }
     }
   }
@@ -440,6 +522,7 @@ function postTransaction(operation: string, payload: Row): Row {
     remarks: payload.remarks || '',
     voided: 0,
     is_reversal: payload.is_reversal ? 1 : 0,
+    idempotency_key: idempotencyKey || null,
   }
   store.inventory_transaction.push(row)
 
@@ -454,22 +537,48 @@ function postTransaction(operation: string, payload: Row): Row {
       trailer_number: row.trailer_number,
       quantity: row.from_qty,
       shipped: 0,
+      cancelled: 0,
     })
   }
   if (order && order.status_id === 1) order.status_id = 2
 
   audit(`post.${op.toLowerCase()}`, 'transaction', transactionId,
     `${spec.label} ${Math.round(fromQty || toQty).toLocaleString()} lbs` +
-    (orderId ? ` on order ${orderId}` : ''), { values: row })
+    (orderId ? ` on order ${orderId}` : ''), { values: row }, orderId)
 
   return hydrateTransaction(row)
 }
 
+/** How long an operator has to reverse their own posting. */
+const SELF_VOID_HOURS = 12
+
+/** Whether this user may reverse this row, and why not if they cannot. */
+export function selfVoidCheck(txn: Row, user: Row): { allowed: boolean; why: string } {
+  if (txn.user_id !== user.user_id) return { allowed: false, why: 'It was posted by someone else.' }
+  if (txn.voided || txn.is_reversal) return { allowed: false, why: 'It has already been reversed.' }
+  const age = hoursSince(txn.transaction_date)
+  if (age === null || age > SELF_VOID_HOURS) {
+    return { allowed: false, why: `It is more than ${SELF_VOID_HOURS} hours old.` }
+  }
+  const code = byId.transactionType().get(txn.transaction_type_id)?.code
+  if (code === 'SHIP') return { allowed: false, why: 'The trailer has already left.' }
+  if (code === 'LOAD') {
+    const stage = store.pending_shipment.find((s) => s.transaction_id === txn.transaction_id)
+    if (stage?.shipped) return { allowed: false, why: 'The trailer has already shipped.' }
+  }
+  return { allowed: true, why: '' }
+}
+
 function voidTransaction(transactionId: number, reason: string): Row {
   const user = requireUser()
-  requirePermission(user, 'txn.void')
   const original = store.inventory_transaction.find((t) => t.transaction_id === transactionId)
   if (!original) return notFound(`Transaction ${transactionId} was not found.`)
+  // An operator may undo their own recent, unshipped posting. Needing a
+  // supervisor for every slip is what turns a thirty-second correction into a
+  // phone call, and a phone call into a load that never gets corrected.
+  if (!hasPermission(user, 'txn.void') && !selfVoidCheck(original, user).allowed) {
+    requirePermission(user, 'txn.void')
+  }
   if (original.voided) refuse(`Transaction ${transactionId} is already voided.`, { transaction_id: transactionId })
   if (!reason.trim()) {
     invalid('A reason is required to void a transaction.', { reason: 'Explain why this is being reversed.' })
@@ -496,11 +605,18 @@ function voidTransaction(transactionId: number, reason: string): Row {
   }
   store.inventory_transaction.push(reversal)
   original.voided = 1
+  reversal.idempotency_key = null
+  // Voiding a load cancels the stage; voiding a ship puts the trailer back on
+  // the dock. Overloading `shipped` for both meant a cancelled load counted as
+  // a shipment and a reversed shipment could never be re-shipped.
+  const code = byId.transactionType().get(original.transaction_type_id)?.code
   for (const stage of store.pending_shipment) {
-    if (stage.transaction_id === transactionId && !stage.shipped) stage.shipped = 1
+    if (code === 'LOAD' && stage.transaction_id === transactionId) stage.cancelled = 1
+    if (code === 'SHIP' && stage.transaction_id === original.parent_transaction_id
+        && !stage.cancelled) stage.shipped = 0
   }
   audit('void', 'transaction', transactionId, `Voided transaction ${transactionId}`,
-    { reason, reversal_id: reversalId })
+    { reason, reversal_id: reversalId }, original.order_id ?? null)
   return hydrateTransaction(reversal)
 }
 
@@ -525,17 +641,42 @@ function activity(filters: Row): Row[] {
   if (filters.date_from) rows = rows.filter((t) => t.user_date >= filters.date_from)
   if (filters.date_to) rows = rows.filter((t) => t.user_date <= filters.date_to)
   rows.sort((a, b) => b.transaction_id - a.transaction_id)
-  return rows.slice(0, Number(filters.limit) || 500).map(hydrateTransaction)
+  return annotateVoidRights(rows.slice(0, Number(filters.limit) || 500).map(hydrateTransaction))
+}
+
+/** Tell each row whether this user can reverse it, and if not, why not.
+ *
+ *  The screen used to render nothing at all where the button would be, so an
+ *  operator looking at their own duplicate load saw no way to fix it and no
+ *  statement that one existed. */
+function annotateVoidRights(rows: Row[]): Row[] {
+  const user = session
+  if (!user) return rows
+  const supervisor = hasPermission(user, 'txn.void')
+  for (const row of rows) {
+    if (supervisor) {
+      row.can_void = !(row.voided || row.is_reversal)
+      row.void_blocked = row.can_void ? '' : 'It has already been reversed.'
+      continue
+    }
+    const { allowed, why } = selfVoidCheck(row, user)
+    row.can_void = allowed
+    row.void_blocked = allowed ? '' : `${why} Ask a supervisor to reverse it.`
+  }
+  return rows
 }
 
 function pendingShipments(plantId?: number | null, orderId?: number | null): Row[] {
   const voided = new Set(store.inventory_transaction.filter((t) => t.voided).map((t) => t.transaction_id))
   return store.pending_shipment
-    .filter((stage) => !stage.shipped && !voided.has(stage.transaction_id))
+    .filter((stage) => !stage.shipped && !stage.cancelled && !voided.has(stage.transaction_id))
     .map((stage): Row => {
       const order = byId.order().get(stage.order_id)!
       const txn = store.inventory_transaction.find((t) => t.transaction_id === stage.transaction_id)!
-      const material = byId.material().get(order.material_one_id)
+      // The product on the trailer is the one that was loaded onto it, not
+      // whatever the order header says.
+      const material = byId.material().get(txn.from_material_id)
+      const ordered = byId.material().get(order.material_one_id)
       return {
         ...stage,
         plant_id: order.plant_id,
@@ -544,6 +685,8 @@ function pendingShipments(plantId?: number | null, orderId?: number | null): Row
         bol_number: txn.to_bol,
         material_number: material?.number ?? null,
         material_description: material?.description ?? null,
+        order_material_number: ordered?.number ?? null,
+        loaded_by: byId.user().get(txn.user_id)?.full_name ?? null,
         loaded_at: txn.transaction_date,
       }
     })
@@ -555,7 +698,12 @@ function pendingShipments(plantId?: number | null, orderId?: number | null): Row
 function ship(stageId: number, userDate?: string): Row {
   const stage = store.pending_shipment.find((s) => s.stage_id === stageId)
   if (!stage) return notFound(`Staged load ${stageId} was not found.`)
+  // Claim the stage before writing the shipment. The server does this inside a
+  // transaction, where it also serialises two terminals racing each other;
+  // there is one thread here, so claiming first is the whole of it.
   if (stage.shipped) refuse('That trailer has already shipped.', { stage_id: stageId })
+  if (stage.cancelled) refuse('That load was voided, so there is nothing to ship.', { stage_id: stageId })
+  stage.shipped = 1
   const load = store.inventory_transaction.find((t) => t.transaction_id === stage.transaction_id)!
   const txn = postTransaction('SHIP', {
     order_id: stage.order_id,
@@ -569,7 +717,6 @@ function ship(stageId: number, userDate?: string): Row {
     user_date: userDate,
     remarks: 'Shipped',
   })
-  stage.shipped = 1
   return txn
 }
 
@@ -586,14 +733,24 @@ function progress(order: Row): Row {
     if (txn.order_id !== order.order_id || txn.voided || txn.is_reversal) continue
     const code = types.get(txn.transaction_type_id)?.code
     if (code && codes.includes(code)) {
-      fulfilled += (code === 'RECEIVE' || code === 'PRODUCE') ? txn.to_qty : txn.from_qty
+      const incoming = code === 'RECEIVE' || code === 'PRODUCE'
+      // Only the ordered product counts. Counting every material meant a load
+      // from the wrong tank showed the order progressing.
+      const material = incoming ? txn.to_material_id : txn.from_material_id
+      if (!order.material_one_id || material === order.material_one_id) {
+        fulfilled += incoming ? txn.to_qty : txn.from_qty
+      }
     }
     if (code === 'SHIP') shipped += txn.from_qty
   }
   const ordered = order.material_one_quantity || 0
+  const remaining = Math.round((ordered - fulfilled) * 100) / 100
   return {
     qty_fulfilled: Math.round(fulfilled * 100) / 100,
     qty_shipped: Math.round(shipped * 100) / 100,
+    // Signed: clamping at zero hid the order that is already over-loaded.
+    qty_remaining: remaining,
+    over_by: remaining < -0.01 ? Math.round(-remaining * 100) / 100 : 0,
     percent_complete: ordered ? Math.min(Math.round((fulfilled / ordered) * 10000) / 100, 999) : 0,
   }
 }
@@ -819,11 +976,16 @@ function orderDetail(orderId: number): Row {
   return detail
 }
 
-function billOfLading(orderId: number): Row {
+/** A bill of lading travels with one truck: pass `transactionId` and it covers
+ *  that load alone. Without it every load on the order is listed, which is the
+ *  order-level view and not what the driver carries. */
+function billOfLading(orderId: number, transactionId?: number | null): Row {
   const order = orderDetail(orderId)
   const types = byId.transactionType()
   const loads = store.inventory_transaction
-    .filter((t) => t.order_id === orderId && !t.voided && types.get(t.transaction_type_id)?.code === 'LOAD')
+    .filter((t) => t.order_id === orderId && !t.voided
+      && types.get(t.transaction_type_id)?.code === 'LOAD'
+      && (!transactionId || t.transaction_id === Number(transactionId)))
     .map((t) => ({
       transaction_id: t.transaction_id,
       bol_number: t.to_bol,
@@ -834,10 +996,24 @@ function billOfLading(orderId: number): Row {
       material_description: byId.material().get(t.from_material_id)?.description ?? null,
       loaded_by: byId.user().get(t.user_id)?.full_name ?? 'system',
     }))
+  // The product printed is the product on the truck. If a load went out under
+  // a different product from the order header, both are reported.
+  const products: Row[] = []
+  for (const load of loads) {
+    if (load.material_number && !products.some((p) => p.number === load.material_number)) {
+      products.push({ number: load.material_number, description: load.material_description ?? '' })
+    }
+  }
   return {
     shipper: { name: 'FEED ENERGY COMPANY', address: '3121 Dean Avenue, Des Moines, IA 50317' },
     order,
     loads,
+    products,
+    material_mismatch: Boolean(
+      products.length && order.material_one_number
+      && !(products.length === 1 && products[0].number === order.material_one_number),
+    ),
+    single_load: Boolean(transactionId),
     qc: store.qc.filter((q) => q.order_id === orderId && q.active)
       .map((q) => ({
         qc_id: q.qc_id, sample_number: q.sample_number, seal_number: q.seal_number,
@@ -948,7 +1124,13 @@ function saveQc(orderId: number, payload: Row, qcId: number | null, acknowledge:
   const hard: Record<string, string> = {}
   for (const field of ['moisture', 'temp', 'ph', 'ffa', 'tfa', 'spintest_fallout']) {
     const value = num(payload[field])
-    if (value === null) continue
+    if (value === null) {
+      // A number that will not parse used to be thrown away silently, and the
+      // operator got a green "QC recorded" for an empty record.
+      const raw = payload[field]
+      if (typeof raw === 'string' && raw.trim()) hard[field] = `"${raw.trim()}" is not a number.`
+      continue
+    }
     if (value < 0) hard[field] = 'Cannot be negative.'
     else if (field === 'ph' && value > 14) hard[field] = 'pH must be between 0 and 14.'
     else if (['moisture', 'ffa', 'tfa'].includes(field) && value > 100) hard[field] = 'Percentages cannot exceed 100.'
@@ -958,6 +1140,17 @@ function saveQc(orderId: number, payload: Row, qcId: number | null, acknowledge:
   if (Object.keys(hard).length) invalid('Check the highlighted values.', hard)
 
   const check = validateQc(orderId, payload)
+  // A missing reading is an incomplete record and stays advisory. A reading
+  // outside spec is a decision, and the server asks for it to be made rather
+  // than trusting one screen to have asked.
+  const outOfSpec = check.warnings.filter((w: Row) => w.severity === 'out_of_spec')
+  if (outOfSpec.length && !acknowledge) {
+    refuse('This result is outside spec. Confirm you have reviewed it before saving.', {
+      rule: 'unacknowledged_warnings',
+      warnings: outOfSpec,
+      acknowledge_field: 'acknowledge_warnings',
+    })
+  }
   let sampleNumber = String(payload.sample_number || '').trim()
   if (!sampleNumber && !qcId
       && (setting('sample.auto_generate', 'false') === 'true' || payload.generate_sample_number)) {
@@ -980,6 +1173,10 @@ function saveQc(orderId: number, payload: Row, qcId: number | null, acknowledge:
     sample_number: sampleNumber,
     blend_serial_number: payload.blend_serial_number || order.blend_serial_number,
     comments: payload.comments || '',
+    // On the record, not only in the audit detail: re-opening a QC record
+    // should show that someone signed off and what they were looking at.
+    acknowledged_warnings: outOfSpec.length && acknowledge ? 1 : 0,
+    warning_snapshot: outOfSpec.length ? JSON.stringify(outOfSpec) : '',
   }
 
   let record: Row
@@ -993,7 +1190,7 @@ function saveQc(orderId: number, payload: Row, qcId: number | null, acknowledge:
       changes: diff(before, values),
       spec_summary: check.summary,
       ...(check.warnings.length ? { warnings: check.warnings, acknowledged_warnings: acknowledge } : {}),
-    })
+    }, orderId)
   } else {
     const newId = nextId('qc', 'qc_id')
     record = {
@@ -1005,7 +1202,7 @@ function saveQc(orderId: number, payload: Row, qcId: number | null, acknowledge:
       values,
       spec_summary: check.summary,
       ...(check.warnings.length ? { warnings: check.warnings, acknowledged_warnings: acknowledge } : {}),
-    })
+    }, orderId)
   }
   return { ...hydrateQc(record), warnings: check.warnings }
 }
@@ -1051,7 +1248,7 @@ function addInProcess(orderId: number, payload: Row): Row {
   }
   store.qc_in_process.push(row)
   audit('qc.in_process', 'qc_in_process', row.reading_id,
-    `In-process ${row.analyte} reading on order ${orderId}`, { order_id: orderId })
+    `In-process ${row.analyte} reading on order ${orderId}`, { order_id: orderId }, orderId)
   return row
 }
 
@@ -1072,26 +1269,34 @@ function qaChecklists(orderId: number): Row[] {
           }
         })
         .sort((a, b) => a.sort_order - b.sort_order)
+      // "No" is a finding; "N/A" is a deliberate answer that the question did
+      // not apply. Collapsing N/A into silence lost the difference between
+      // "checked, does not apply" and "never asked".
+      const isNa = (value: string) => ['N/A', 'NA', 'NOT APPLICABLE']
+        .includes(String(value ?? '').trim().toUpperCase())
       return {
         ...header,
         responses,
         exceptions: responses.filter((r) => r.response === 'No').map((r) => r.question),
+        not_applicable: responses.filter((r) => isNa(r.response)).map((r) => r.question),
       }
     })
 }
 
-function saveQaChecklist(orderId: number, payload: Row): Row {
+function saveQaChecklist(orderId: number, payload: Row, stage?: string | null): Row {
   const user = requireUser()
   requirePermission(user, 'qc.write')
   const order = byId.order().get(orderId)
   if (!order) return notFound(`Order ${orderId} was not found.`)
-  const questions = store.qa_question.filter((q) => q.enabled)
+  const questions = store.qa_question
+    .filter((q) => q.enabled && (!stage || (q.stage ?? 'post_load') === stage))
   const responses = payload.responses ?? {}
   const unanswered = questions
     .filter((q) => !String(responses[String(q.question_id)] ?? responses[q.question_id] ?? '').trim())
     .map((q) => q.question)
   if (unanswered.length) {
-    invalid('Answer every checklist question before saving.', { responses: unanswered.join('; ') })
+    invalid('Answer every checklist question before saving. '
+      + 'Mark anything that does not apply as N/A.', { responses: unanswered.join('; ') })
   }
 
   const headerId = nextId('qa_header', 'header_id')
@@ -1103,6 +1308,7 @@ function saveQaChecklist(orderId: number, payload: Row): Row {
     trailer_number: payload.trailer_number || '',
     trailer_load_time: payload.trailer_load_time ?? null,
     comments: payload.comments || '',
+    stage: stage || 'post_load',
     voided: 0,
     date_added: nowIso(),
     added_by: user.username,
@@ -1119,7 +1325,7 @@ function saveQaChecklist(orderId: number, payload: Row): Row {
     .filter((q) => String(responses[String(q.question_id)] ?? responses[q.question_id]) === 'No')
     .map((q) => q.question)
   audit('qa.checklist', 'qa_header', headerId, `QA checklist completed on order ${orderId}`,
-    { failures, order_id: orderId })
+    { failures, order_id: orderId }, orderId)
   return qaChecklists(orderId)[0]
 }
 
@@ -1283,7 +1489,9 @@ function listSpecs(family?: string | null, needsReview?: boolean): Row[] {
 
 function upsertSpec(payload: Row): Row {
   const user = requireUser()
-  requirePermission(user, 'spec.read')
+  // Widening a limit makes a failing result pass, so reading the limit and
+  // changing it are not the same permission.
+  requirePermission(user, 'spec.write')
   const materialId = Number(payload.material_id)
   const analyte = payload.analyte
   if (!ANALYTE_LABELS[analyte]) invalid(`Unknown analyte ${analyte}.`, { analyte: 'Not a known analyte.' })
@@ -2099,7 +2307,7 @@ async function route(method: string, path: string, body: Row): Promise<any> {
   if ((m = match(path, '/api/materials/:id')) && method === 'GET') return materialDetail(Number(m[0]))
   if ((m = match(path, '/api/materials/:id/tests')) && method === 'PUT') {
     const user = requireUser()
-    requirePermission(user, 'spec.read')
+    requirePermission(user, 'spec.write')
     const materialId = Number(m[0])
     const analytes: string[] = body.analytes ?? []
     const unknown = analytes.filter((a) => !ANALYTE_LABELS[a])
@@ -2150,11 +2358,18 @@ async function route(method: string, path: string, body: Row): Promise<any> {
   if ((m = match(path, '/api/orders/:id')) && method === 'GET') return orderDetail(Number(m[0]))
   if ((m = match(path, '/api/orders/:id')) && method === 'PATCH') return updateOrder(Number(m[0]), body)
   if ((m = match(path, '/api/orders/:id/audit')) && method === 'GET') {
+    // Everything that happened to the order, not only edits to the order row:
+    // its loads, ships, voids and QC are recorded against their own entity,
+    // which left this screen permanently empty.
+    const id = Number(m[0])
     return store.audit_log
-      .filter((entry) => entry.entity === 'order' && entry.entity_id === m![0])
+      .filter((entry) => entry.order_id === id
+        || (entry.entity === 'order' && entry.entity_id === String(id)))
       .sort((a, b) => b.audit_id - a.audit_id)
   }
-  if ((m = match(path, '/api/orders/:id/bol')) && method === 'GET') return billOfLading(Number(m[0]))
+  if ((m = match(path, '/api/orders/:id/bol')) && method === 'GET') {
+    return billOfLading(Number(m[0]), params.transaction_id ? Number(params.transaction_id) : null)
+  }
   if ((m = match(path, '/api/orders/:id/qc')) && method === 'GET') return qcForOrder(Number(m[0]))
   if ((m = match(path, '/api/orders/:id/qc')) && method === 'POST') {
     return saveQc(Number(m[0]), body, null, Boolean(body.acknowledge_warnings))
@@ -2168,7 +2383,7 @@ async function route(method: string, path: string, body: Row): Promise<any> {
   }
   if ((m = match(path, '/api/orders/:id/qa-checklist')) && method === 'GET') return qaChecklists(Number(m[0]))
   if ((m = match(path, '/api/orders/:id/qa-checklist')) && method === 'POST') {
-    return saveQaChecklist(Number(m[0]), body)
+    return saveQaChecklist(Number(m[0]), body, params.stage ?? null)
   }
 
   // inventory

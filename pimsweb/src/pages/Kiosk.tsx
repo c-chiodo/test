@@ -5,7 +5,7 @@
  * stays signed in as whoever used it last and the audit trail becomes fiction.
  * So: pick your name, tap a PIN, get a short session. */
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { api, qs, token as tokenStore } from '../lib/api'
 import type { Plant, User } from '../lib/types'
 import { ErrorBox, Loading, useAsync } from '../components/ui'
@@ -17,12 +17,18 @@ export function kioskPlantId(): number | null {
   return stored > 0 ? stored : null
 }
 
-export default function Kiosk({ onSignedIn }: { onSignedIn: (user: User) => void }) {
+export default function Kiosk({
+  onSignedIn, signedOutReason,
+}: {
+  onSignedIn: (user: User) => void
+  signedOutReason?: string
+}) {
   const [plantId, setPlantId] = useState<number | null>(kioskPlantId())
   const [person, setPerson] = useState<{ username: string; full_name: string } | null>(null)
   const [pin, setPin] = useState('')
   const [error, setError] = useState<unknown>(null)
   const [busy, setBusy] = useState(false)
+  const pinInput = useRef<HTMLInputElement>(null)
 
   const plants = useAsync(() => api.get<Plant[]>('/api/kiosk/plants'), [])
   const people = useAsync(
@@ -33,15 +39,12 @@ export default function Kiosk({ onSignedIn }: { onSignedIn: (user: User) => void
     [plantId],
   )
 
-  // A scanner or keypad can type the PIN; Enter submits.
-  useEffect(() => {
-    if (pin.length >= 4 && person) {
-      const handle = setTimeout(() => submit(), 120)
-      return () => clearTimeout(handle)
-    }
-    return undefined
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pin])
+  // A real input, so a keyboard, a badge scanner and a screen reader can all
+  // enter a PIN. The pad below writes into the same value. This screen used to
+  // be pad-only despite a comment claiming otherwise, which left anyone
+  // without a working touchscreen — or using assistive technology — stuck at
+  // the door.
+  useEffect(() => { if (person) pinInput.current?.focus() }, [person])
 
   async function submit() {
     if (!person || pin.length < 4 || busy) return
@@ -107,6 +110,13 @@ export default function Kiosk({ onSignedIn }: { onSignedIn: (user: User) => void
             </button>
           </div>
 
+          {/* Being dropped back to a sign-in screen with no explanation reads
+              as a fault. Saying what happened, and that nothing was lost,
+              is the difference between carrying on and starting over. */}
+          {signedOutReason && !person && (
+            <div className="notice" role="status">{signedOutReason}</div>
+          )}
+
           {!person ? (
             people.loading ? <Loading /> : (
               <div className="people">
@@ -125,19 +135,48 @@ export default function Kiosk({ onSignedIn }: { onSignedIn: (user: User) => void
             )
           ) : (
             <>
-              <div className="pin-display">{'•'.repeat(pin.length)}</div>
+              <label className="sr-only" htmlFor="kiosk-pin">PIN</label>
+              <input
+                id="kiosk-pin"
+                ref={pinInput}
+                className="pin-display"
+                type="password"
+                inputMode="numeric"
+                autoComplete="off"
+                autoFocus
+                aria-describedby="kiosk-pin-hint"
+                value={pin}
+                onChange={(event) => setPin(event.target.value.replace(/\D/g, '').slice(0, 8))}
+              />
+              <div id="kiosk-pin-hint" className="muted small">
+                Tap it in, or type it — {pin.length < 4 ? '4 digits or more' : 'press Sign in'}.
+              </div>
               {error ? <ErrorBox error={error} /> : null}
               <div className="pinpad">
                 {['1', '2', '3', '4', '5', '6', '7', '8', '9'].map((digit) => (
-                  <button key={digit} type="button" onClick={() => setPin((current) => (current + digit).slice(0, 8))}>
+                  <button
+                    key={digit}
+                    type="button"
+                    aria-label={digit}
+                    onClick={() => setPin((current) => (current + digit).slice(0, 8))}
+                  >
                     {digit}
                   </button>
                 ))}
-                <button type="button" onClick={() => { setPerson(null); setPin('') }}>←</button>
-                <button type="button" onClick={() => setPin((current) => (current + '0').slice(0, 8))}>0</button>
-                <button type="button" onClick={() => setPin((current) => current.slice(0, -1))}>⌫</button>
+                <button type="button" aria-label="Back to the name list" onClick={() => { setPerson(null); setPin('') }}>←</button>
+                <button type="button" aria-label="0" onClick={() => setPin((current) => (current + '0').slice(0, 8))}>0</button>
+                <button type="button" aria-label="Delete the last digit" onClick={() => setPin((current) => current.slice(0, -1))}>⌫</button>
               </div>
-              {busy && <div className="row" style={{ marginTop: 10 }}><span className="spinner" /> Checking…</div>}
+              {/* Explicit rather than auto-submitting at four digits: a PIN can
+                  be longer than four, and with attempt throttling in place an
+                  early submit would burn an attempt on a half-typed PIN. */}
+              <button
+                type="submit"
+                className="primary pin-submit"
+                disabled={busy || pin.length < 4}
+              >
+                {busy ? <span className="spinner" /> : null} Sign in
+              </button>
             </>
           )}
         </form>

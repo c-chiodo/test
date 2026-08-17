@@ -6,9 +6,9 @@
  * This is the same five things in sequence, with every value the system already
  * knows filled in and the reason shown next to it. */
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, useToast } from '../App'
-import { api, qs } from '../lib/api'
+import { api, newKey, qs } from '../lib/api'
 import type { Balance, Order, QcValidation } from '../lib/types'
 import {
   Alert, Badge, Card, DataTable, ErrorBox, Field, Loading, SpecBadge,
@@ -30,17 +30,85 @@ interface ScaleReading {
   captured_at: string
 }
 
-const STEPS = ['Order', 'Load', 'Quality', 'Checklist', 'Ship'] as const
+/* The trailer inspection comes before the load, not after it. Four of the
+ * checklist questions ask whether an *empty* trailer is clean, dry and
+ * compatible with the product; asking them once the product is aboard makes
+ * them paperwork rather than a check. */
+const STEPS = ['Order', 'Trailer', 'Load', 'Quality', 'Sign-off', 'Ship'] as const
 type Step = (typeof STEPS)[number]
+
+/* Where a flow in progress is kept.
+ *
+ * Every value below used to live in React state alone, so a kiosk idle
+ * sign-out at 180 seconds — or a closed laptop, or a reload — threw away the
+ * fact that a truck had already been loaded. The load itself was committed:
+ * product had left the tank, a BOL number was minted, a stage was waiting. The
+ * operator came back to an empty screen and loaded the truck again. */
+const FLOW_KEY = 'pims.flow'
+
+interface FlowState {
+  orderId: number | null
+  step: Step
+  loadTxn: any
+  qcRecord: any
+  preLoadDone: boolean
+  checklistDone: boolean
+  shipped: any
+  startedAt: number
+}
+
+const EMPTY_FLOW: FlowState = {
+  orderId: null,
+  step: 'Order',
+  loadTxn: null,
+  qcRecord: null,
+  preLoadDone: false,
+  checklistDone: false,
+  shipped: null,
+  startedAt: 0,
+}
+
+function readFlow(): FlowState | null {
+  try {
+    const raw = sessionStorage.getItem(FLOW_KEY)
+    if (!raw) return null
+    const saved = JSON.parse(raw) as FlowState
+    // A flow older than a shift is stale; do not offer to resume yesterday.
+    if (!saved.orderId || Date.now() - (saved.startedAt || 0) > 12 * 3_600_000) return null
+    return saved
+  } catch {
+    return null
+  }
+}
 
 export default function LoadAndShip({ initialOrderId }: { initialOrderId?: number }) {
   const { plantCode, navigate, can } = useApp()
-  const [step, setStep] = useState<Step>(initialOrderId ? 'Load' : 'Order')
-  const [orderId, setOrderId] = useState<number | null>(initialOrderId ?? null)
-  const [loadTxn, setLoadTxn] = useState<any>(null)
-  const [qcRecord, setQcRecord] = useState<any>(null)
-  const [checklistDone, setChecklistDone] = useState(false)
-  const [shipped, setShipped] = useState<any>(null)
+  const resumed = useMemo(() => (initialOrderId ? null : readFlow()), [initialOrderId])
+  const [flow, setFlow] = useState<FlowState>(
+    () => resumed ?? {
+      ...EMPTY_FLOW,
+      orderId: initialOrderId ?? null,
+      step: initialOrderId ? 'Trailer' : 'Order',
+      startedAt: Date.now(),
+    },
+  )
+  const [resumeNotice, setResumeNotice] = useState(Boolean(resumed))
+  const { orderId, step, loadTxn, qcRecord, preLoadDone, checklistDone, shipped } = flow
+
+  const patch = (values: Partial<FlowState>) =>
+    setFlow((current) => ({ ...current, ...values }))
+  const setStep = (next: Step) => patch({ step: next })
+
+  // Written on every change rather than on unmount: a kiosk sign-out unmounts
+  // the whole tree without warning, and an unload handler does not always run.
+  useEffect(() => {
+    try {
+      if (flow.orderId) sessionStorage.setItem(FLOW_KEY, JSON.stringify(flow))
+      else sessionStorage.removeItem(FLOW_KEY)
+    } catch {
+      /* a full or disabled sessionStorage must not break the flow */
+    }
+  }, [flow])
 
   const order = useAsync(
     () => (orderId ? api.get<Order>(`/api/orders/${orderId}`) : Promise.resolve(null as any)),
@@ -48,19 +116,17 @@ export default function LoadAndShip({ initialOrderId }: { initialOrderId?: numbe
   )
 
   function restart() {
-    setOrderId(null)
-    setLoadTxn(null)
-    setQcRecord(null)
-    setChecklistDone(false)
-    setShipped(null)
-    setStep('Order')
+    try { sessionStorage.removeItem(FLOW_KEY) } catch { /* nothing to clear */ }
+    setResumeNotice(false)
+    setFlow({ ...EMPTY_FLOW, startedAt: Date.now() })
   }
 
   const done: Record<Step, boolean> = {
     Order: Boolean(orderId),
+    Trailer: preLoadDone,
     Load: Boolean(loadTxn),
     Quality: Boolean(qcRecord),
-    Checklist: checklistDone,
+    'Sign-off': checklistDone,
     Ship: Boolean(shipped),
   }
 
@@ -81,26 +147,67 @@ export default function LoadAndShip({ initialOrderId }: { initialOrderId?: numbe
         </div>
       </div>
 
+      {resumeNotice && (
+        <div style={{ marginBottom: 14 }}>
+          <Alert
+            tone={loadTxn ? 'warn' : 'info'}
+            title={loadTxn ? 'You were part way through loading a truck' : 'Picking up where you left off'}
+          >
+            {loadTxn ? (
+              <>
+                Trailer <strong>{loadTxn.trailer_number || '—'}</strong> was loaded with{' '}
+                {fmtLbs(loadTxn.from_qty)} lbs on BOL <strong>{loadTxn.to_bol}</strong>
+                {shipped ? ' and has shipped.' : ' and has not shipped yet.'}{' '}
+                {shipped ? '' : 'Carry on from here rather than loading it again.'}
+              </>
+            ) : (
+              <>Order {orderId} was already selected.</>
+            )}
+            <div className="row" style={{ gap: 8, marginTop: 10 }}>
+              <button className="sm" onClick={() => setResumeNotice(false)}>Carry on</button>
+              <button className="sm" onClick={restart}>Start a different truck</button>
+            </div>
+          </Alert>
+        </div>
+      )}
+
       <div className="steps">
         {STEPS.map((name, i) => (
           <button
             key={name}
             className={`step${name === step ? ' active' : ''}${done[name] ? ' done' : ''}`}
             disabled={!orderId && name !== 'Order'}
+            aria-current={name === step ? 'step' : undefined}
             onClick={() => setStep(name)}
           >
-            <span className="n">{done[name] ? '✓' : i + 1}</span>
+            <span className="n" aria-hidden="true">{done[name] ? '✓' : i + 1}</span>
             {name}
+            <span className="sr-only">{done[name] ? ' — done' : ''}</span>
           </button>
         ))}
       </div>
 
-      {step === 'Order' && <PickOrder onPicked={(id) => { setOrderId(id); setStep('Load') }} />}
+      {step === 'Order' && (
+        <PickOrder onPicked={(id) => patch({ orderId: id, step: 'Trailer', startedAt: Date.now() })} />
+      )}
+      {step === 'Trailer' && orderId && (
+        <ChecklistStep
+          key="pre"
+          stage="pre_load"
+          orderId={orderId}
+          trailerNumber={order.data?.trailer_number ?? ''}
+          done={preLoadDone}
+          onDone={() => patch({ preLoadDone: true, step: 'Load' })}
+          onSkip={() => setStep('Load')}
+        />
+      )}
       {step === 'Load' && orderId && (
         <LoadStep
           orderId={orderId}
           posted={loadTxn}
-          onPosted={(txn) => { setLoadTxn(txn); setStep('Quality') }}
+          preLoadDone={preLoadDone}
+          onCheckTrailer={() => setStep('Trailer')}
+          onPosted={(txn) => patch({ loadTxn: txn, step: 'Quality' })}
         />
       )}
       {step === 'Quality' && orderId && (
@@ -108,21 +215,29 @@ export default function LoadAndShip({ initialOrderId }: { initialOrderId?: numbe
           orderId={orderId}
           saved={qcRecord}
           canWrite={can('qc.write')}
-          onSaved={(record) => { setQcRecord(record); setStep('Checklist') }}
-          onSkip={() => setStep('Checklist')}
+          onSaved={(record) => patch({ qcRecord: record, step: 'Sign-off' })}
+          onSkip={() => setStep('Sign-off')}
         />
       )}
-      {step === 'Checklist' && orderId && (
+      {step === 'Sign-off' && orderId && (
         <ChecklistStep
+          key="post"
+          stage="post_load"
           orderId={orderId}
           trailerNumber={loadTxn?.trailer_number ?? order.data?.trailer_number ?? ''}
           done={checklistDone}
-          onDone={() => { setChecklistDone(true); setStep('Ship') }}
+          onDone={() => patch({ checklistDone: true, step: 'Ship' })}
           onSkip={() => setStep('Ship')}
         />
       )}
       {step === 'Ship' && orderId && (
-        <ShipStep orderId={orderId} shipped={shipped} onShipped={setShipped} onRestart={restart} />
+        <ShipStep
+          orderId={orderId}
+          loadTxn={loadTxn}
+          shipped={shipped}
+          onShipped={(txn) => patch({ shipped: txn })}
+          onRestart={restart}
+        />
       )}
     </>
   )
@@ -139,11 +254,28 @@ function PickOrder({ onPicked }: { onPicked: (orderId: number) => void }) {
     [plantId],
   )
 
+  // Orders with product still to load come first. An order that is already
+  // loaded to its full quantity is not work, and burying the real jobs under
+  // a screenful of finished ones is how the wrong order gets picked.
+  const rows = [...(result.data?.rows ?? [])].sort((a, b) => {
+    const left = (row: Order) => row.material_one_quantity - row.qty_fulfilled
+    return Number(left(b) > 0.5) - Number(left(a) > 0.5)
+  })
+  const ready = rows.filter((row) => row.material_one_quantity - row.qty_fulfilled > 0.5).length
+
   return (
-    <Card title="Sales orders ready to load" subtitle="Open orders at this plant" tight>
+    <Card
+      title="Sales orders ready to load"
+      subtitle={
+        result.data
+          ? `${ready} with product still to load · ${rows.length - ready} already loaded`
+          : 'Open orders at this plant'
+      }
+      tight
+    >
       {result.loading ? <Loading /> : result.error ? <ErrorBox error={result.error} /> : (
         <DataTable
-          rows={result.data?.rows ?? []}
+          rows={rows}
           rowKey={(row) => row.order_id}
           onRowClick={(row) => onPicked(row.order_id)}
           empty="No open sales orders at this plant."
@@ -160,7 +292,15 @@ function PickOrder({ onPicked }: { onPicked: (orderId: number) => void }) {
               key: 'remaining',
               label: 'Left to load',
               numeric: true,
-              render: (row) => fmtLbs(Math.max(row.material_one_quantity - row.qty_fulfilled, 0)),
+              // Signed. Clamping at zero hid exactly the row that needed
+              // attention: an order already loaded past what was ordered,
+              // sitting in the list looking like ordinary work.
+              render: (row) => {
+                const left = row.material_one_quantity - row.qty_fulfilled
+                if (left > 0.5) return fmtLbs(left)
+                if (left < -0.5) return <Badge tone="warn">{fmtLbs(-left)} over</Badge>
+                return <Badge tone="ok">fully loaded</Badge>
+              },
             },
             { key: 'trailer_number', label: 'Trailer' },
             { key: 'go', label: '', render: () => <button className="sm primary">Load this</button> },
@@ -174,14 +314,24 @@ function PickOrder({ onPicked }: { onPicked: (orderId: number) => void }) {
 /* ------------------------------------------------------------- 2. load */
 
 function LoadStep({
-  orderId, posted, onPosted,
-}: { orderId: number; posted: any; onPosted: (txn: any) => void }) {
+  orderId, posted, preLoadDone, onCheckTrailer, onPosted,
+}: {
+  orderId: number
+  posted: any
+  preLoadDone: boolean
+  onCheckTrailer: () => void
+  onPosted: (txn: any) => void
+}) {
   const { plantId, reference } = useApp()
   const toast = useToast()
   const [form, setForm] = useState<Record<string, any>>({})
   const [error, setError] = useState<any>(null)
   const [busy, setBusy] = useState(false)
   const [reading, setReading] = useState<ScaleReading | null>(null)
+  // Minted once for this form and kept until the post succeeds, so pressing
+  // the button again after a dropped connection returns the transaction that
+  // already exists instead of loading the truck twice.
+  const idempotencyKey = useRef(newKey())
 
   const prefill = useAsync(
     () => api.get<Prefill>(`/api/prefill/load${qs({ order_id: orderId, plant_id: plantId })}`),
@@ -219,11 +369,16 @@ function LoadStep({
   const set = (patch: Record<string, any>) => setForm((current) => ({ ...current, ...patch }))
   const locations = reference.locations.filter((location) => location.plant_id === plantId)
 
-  async function post() {
+  async function post(acknowledgeOverLoad = false) {
     setBusy(true); setError(null)
     try {
       const payload: Record<string, any> = { order_id: orderId, plant_id: plantId, ...form }
+      // A load relocates product: the same product, the same weight. The form
+      // shows one Product and one Quantity for exactly that reason.
+      payload.to_material_id = payload.from_material_id
       payload.to_qty = payload.from_qty
+      payload.idempotency_key = idempotencyKey.current
+      if (acknowledgeOverLoad) payload.acknowledge_over_load = true
       if (reading) payload.scale_reading_id = reading.reading_id
       delete payload.bol_preview
       const txn = await api.post<any>('/api/transactions/load', payload)
@@ -231,6 +386,11 @@ function LoadStep({
       onPosted(txn)
     } catch (err) { setError(err) } finally { setBusy(false) }
   }
+
+  // The server refuses a load that would take the order past what was ordered
+  // and says by how much. Split loads are normal, so this is a confirmation
+  // rather than a wall.
+  const overLoad = error?.detail?.rule === 'over_fulfilment' ? error.detail : null
 
   if (prefill.loading) return <Loading />
 
@@ -305,6 +465,32 @@ function LoadStep({
           </div>
         )}
 
+        {overLoad && (
+          <div style={{ marginTop: 12 }}>
+            <Alert tone="warn" title={`This puts the order ${fmtLbs(overLoad.over_by)} lbs over`}>
+              {fmtLbs(overLoad.already_loaded)} lbs of {fmtLbs(overLoad.ordered)} lbs are already
+              loaded. Split loads are normal — confirm if this one is meant to go out.
+              <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                <button className="sm primary" disabled={busy} onClick={() => post(true)}>
+                  Yes, post it anyway
+                </button>
+              </div>
+            </Alert>
+          </div>
+        )}
+
+        {!preLoadDone && (
+          <div style={{ marginTop: 12 }}>
+            <Alert tone="warn" title="The trailer has not been checked">
+              The clean, dry and previous-load questions are about an empty trailer, so they
+              are asked before the product goes in.
+              <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                <button className="sm primary" onClick={onCheckTrailer}>Check the trailer</button>
+              </div>
+            </Alert>
+          </div>
+        )}
+
         {prefill.data?.notes.length ? (
           <div className="why">
             {prefill.data.notes.map((note, i) => <span key={i}>{note}</span>)}
@@ -312,7 +498,11 @@ function LoadStep({
         ) : null}
 
         <div className="row end" style={{ marginTop: 16 }}>
-          <button className="primary" onClick={post} disabled={busy || overdrawn || !form.from_qty}>
+          <button
+            className="primary"
+            onClick={() => post()}
+            disabled={busy || overdrawn || !form.from_qty || !preLoadDone}
+          >
             {busy ? <span className="spinner" /> : null} Post load
           </button>
         </div>
@@ -418,6 +608,16 @@ function QualityStep({
 
   const required = useMemo(() => new Set(check?.required_tests ?? []), [check])
   const warnings = check?.warnings ?? []
+  // An out-of-spec number is a decision and needs a signature; a reading not
+  // typed in yet is just an unfinished record and must not block the save.
+  const outOfSpec = warnings.filter((warning) => warning.severity === 'out_of_spec')
+  const advisories = warnings.filter((warning) => warning.severity !== 'out_of_spec')
+  // The banner used to name every analyte the product is tested for, including
+  // the ones this form has no box for — so it promised seven tests and offered
+  // six. The ones that arrive from LIMS are now listed as such.
+  const formAnalytes = new Set(QC_FIELDS.map((field) => field.analyte))
+  const onThisForm = (check?.required_tests ?? []).filter((a) => formAnalytes.has(a))
+  const fromLims = (check?.required_tests ?? []).filter((a) => !formAnalytes.has(a))
   const set = (patch: Record<string, any>) => setForm((current) => ({ ...current, ...patch }))
 
   async function generateSample() {
@@ -471,8 +671,19 @@ function QualityStep({
       {error && <div style={{ marginBottom: 12 }}><ErrorBox error={error} /></div>}
       {check && (
         <div style={{ marginBottom: 14 }}>
-          <Alert tone="info" title={`Tested for: ${check.required_tests.join(', ').toUpperCase() || 'nothing'}`}>
-            {check.not_tested.length > 0 && `Not run for this product: ${check.not_tested.join(', ')}.`}
+          <Alert
+            tone="info"
+            title={`Enter here: ${onThisForm.join(', ').toUpperCase() || 'nothing'}`}
+          >
+            {fromLims.length > 0 && (
+              <div>
+                Also tested for {fromLims.join(', ')} — those come back from the lab and are
+                not typed on this screen.
+              </div>
+            )}
+            {check.not_tested.length > 0 && (
+              <div>Not run for this product: {check.not_tested.join(', ')}.</div>
+            )}
           </Alert>
         </div>
       )}
@@ -526,23 +737,38 @@ function QualityStep({
         </Field>
       </div>
 
-      {warnings.length > 0 && (
-        <div className="stack" style={{ marginTop: 14 }}>
-          <Alert tone="warn" title={`${warnings.length} thing(s) to check`}>
+      {advisories.length > 0 && (
+        <div style={{ marginTop: 14 }}>
+          <Alert tone="info" title={`${advisories.length} still to enter`}>
             <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
-              {warnings.map((warning, i) => <li key={i}>{warning.message}</li>)}
+              {advisories.map((warning, i) => <li key={i}>{warning.message}</li>)}
+            </ul>
+            A partial record saves fine — come back and finish it.
+          </Alert>
+        </div>
+      )}
+
+      {outOfSpec.length > 0 && (
+        <div className="stack" style={{ marginTop: 14 }}>
+          <Alert tone="warn" title={`${outOfSpec.length} result(s) outside spec`}>
+            <ul style={{ margin: '4px 0 0 16px', padding: 0 }}>
+              {outOfSpec.map((warning, i) => <li key={i}>{warning.message}</li>)}
             </ul>
           </Alert>
-          <label className="row small" style={{ gap: 8 }}>
+          <label className="row small check" style={{ gap: 10 }}>
             <input type="checkbox" checked={acknowledged} onChange={(e) => setAcknowledged(e.target.checked)} />
-            Reviewed — save anyway (recorded in the audit trail).
+            Reviewed — save anyway. Your name and these numbers go on the record.
           </label>
         </div>
       )}
 
       <div className="step-actions">
         <button onClick={onSkip}>Skip for now</button>
-        <button className="primary" onClick={save} disabled={busy || (warnings.length > 0 && !acknowledged)}>
+        <button
+          className="primary"
+          onClick={save}
+          disabled={busy || (outOfSpec.length > 0 && !acknowledged)}
+        >
           {busy ? <span className="spinner" /> : null} Save QC
         </button>
       </div>
@@ -552,9 +778,27 @@ function QualityStep({
 
 /* -------------------------------------------------------- 4. checklist */
 
+const CHECKLIST_COPY = {
+  pre_load: {
+    title: 'Check the trailer',
+    lead: 'Before any product goes in.',
+    doneTitle: 'Trailer checked',
+    save: 'Trailer is good — continue',
+    skip: 'Skip the trailer check',
+  },
+  post_load: {
+    title: 'Sign off the load',
+    lead: 'Seals and load temperature, now the truck is full.',
+    doneTitle: 'Signed off',
+    save: 'Save sign-off',
+    skip: 'Skip for now',
+  },
+} as const
+
 function ChecklistStep({
-  orderId, trailerNumber, done, onDone, onSkip,
+  stage, orderId, trailerNumber, done, onDone, onSkip,
 }: {
+  stage: 'pre_load' | 'post_load'
   orderId: number
   trailerNumber: string
   done: boolean
@@ -566,63 +810,93 @@ function ChecklistStep({
   const [responses, setResponses] = useState<Record<number, string>>({})
   const [error, setError] = useState<any>(null)
   const [busy, setBusy] = useState(false)
+  const copy = CHECKLIST_COPY[stage]
 
-  const questions = reference.qa_questions
-  const answered = questions.filter((q) => responses[q.question_id]).length
+  const questions = reference.qa_questions.filter((q) => (q.stage ?? 'post_load') === stage)
+  const answered = questions.filter((q) => String(responses[q.question_id] ?? '').trim()).length
 
   async function save() {
     setBusy(true); setError(null)
     try {
-      await api.post(`/api/orders/${orderId}/qa-checklist`, {
+      await api.post(`/api/orders/${orderId}/qa-checklist?stage=${stage}`, {
         responses,
         trailer_number: trailerNumber,
         trailer_load_time: new Date().toISOString(),
       })
-      toast.push('success', 'Checklist saved')
+      toast.push('success', `${copy.title} saved`)
       onDone()
     } catch (err) { setError(err) } finally { setBusy(false) }
   }
 
   if (done) {
-    return <Card title="Checklist complete"><Badge tone="ok">All questions answered</Badge></Card>
+    return <Card title={copy.doneTitle}><Badge tone="ok">All questions answered</Badge></Card>
+  }
+  if (questions.length === 0) {
+    return (
+      <Card title={copy.title}>
+        <Alert tone="info" title="Nothing to answer">No questions are set up for this step.</Alert>
+        <div className="step-actions"><button className="primary" onClick={onDone}>Continue</button></div>
+      </Card>
+    )
   }
 
   return (
-    <Card title="QA checklist" subtitle={`Trailer ${trailerNumber || '—'} · ${answered}/${questions.length} answered`}>
+    <Card
+      title={copy.title}
+      subtitle={`${copy.lead} Trailer ${trailerNumber || '—'} · ${answered}/${questions.length} answered`}
+    >
       {error && <div style={{ marginBottom: 12 }}><ErrorBox error={error} /></div>}
       <div className="stack">
-        {questions.map((question) => (
-          <div key={question.question_id} className="row" style={{ justifyContent: 'space-between', gap: 16 }}>
-            <span>{question.question}</span>
-            {question.answer_type === 'yesno' ? (
-              <div className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
-                {['Yes', 'No', 'N/A'].map((option) => (
+        {questions.map((question) => {
+          const answer = responses[question.question_id] ?? ''
+          const setAnswer = (value: string) =>
+            setResponses((current) => ({ ...current, [question.question_id]: value }))
+          return (
+            <div key={question.question_id} className="qa-question">
+              <span id={`q-${question.question_id}`}>{question.question}</span>
+              {question.answer_type === 'yesno' ? (
+                <div className="qa-answers" role="group" aria-labelledby={`q-${question.question_id}`}>
+                  {['Yes', 'No', 'N/A'].map((option) => (
+                    <button
+                      key={option}
+                      className={answer === option ? 'primary' : ''}
+                      aria-pressed={answer === option}
+                      onClick={() => setAnswer(option)}
+                    >
+                      {option}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                // A written or numeric answer needs an N/A too. Without one the
+                // only way past a question that does not apply — a tank wagon
+                // with no wash ticket — was to invent a value.
+                <div className="qa-answers">
+                  <input
+                    aria-labelledby={`q-${question.question_id}`}
+                    style={{ maxWidth: 200 }}
+                    inputMode={question.answer_type === 'number' ? 'decimal' : 'text'}
+                    disabled={answer === 'N/A'}
+                    value={answer === 'N/A' ? '' : answer}
+                    onChange={(event) => setAnswer(event.target.value)}
+                  />
                   <button
-                    key={option}
-                    className={responses[question.question_id] === option ? 'primary' : ''}
-                    onClick={() => setResponses((current) => ({ ...current, [question.question_id]: option }))}
+                    className={answer === 'N/A' ? 'primary' : ''}
+                    aria-pressed={answer === 'N/A'}
+                    onClick={() => setAnswer(answer === 'N/A' ? '' : 'N/A')}
                   >
-                    {option}
+                    N/A
                   </button>
-                ))}
-              </div>
-            ) : (
-              <input
-                style={{ maxWidth: 220 }}
-                inputMode={question.answer_type === 'number' ? 'decimal' : 'text'}
-                value={responses[question.question_id] ?? ''}
-                onChange={(event) => setResponses((current) => ({
-                  ...current, [question.question_id]: event.target.value,
-                }))}
-              />
-            )}
-          </div>
-        ))}
+                </div>
+              )}
+            </div>
+          )
+        })}
       </div>
       <div className="step-actions">
-        <button onClick={onSkip}>Skip for now</button>
+        <button onClick={onSkip}>{copy.skip}</button>
         <button className="primary" onClick={save} disabled={busy || answered < questions.length}>
-          Save checklist
+          {copy.save}
         </button>
       </div>
     </Card>
@@ -632,23 +906,44 @@ function ChecklistStep({
 /* ------------------------------------------------------------- 5. ship */
 
 function ShipStep({
-  orderId, shipped, onShipped, onRestart,
+  orderId, loadTxn, shipped, onShipped, onRestart,
 }: {
   orderId: number
+  loadTxn: any
   shipped: any
   onShipped: (txn: any) => void
   onRestart: () => void
 }) {
   const toast = useToast()
   const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState<any>(null)
   const staged = useAsync(
     () => api.get<any[]>(`/api/shipments/pending${qs({ order_id: orderId })}`),
     [orderId, shipped?.transaction_id],
   )
-  const bol = useAsync(() => api.get<any>(`/api/orders/${orderId}/bol`), [orderId, shipped?.transaction_id])
+  // The document that leaves with the driver covers the truck in front of
+  // them. Asking for the order-wide BOL printed every load on the order and
+  // totalled them, which on a split order is somebody else's freight.
+  const bol = useAsync(
+    () => api.get<any>(
+      `/api/orders/${orderId}/bol${qs({ transaction_id: loadTxn?.transaction_id })}`,
+    ),
+    [orderId, loadTxn?.transaction_id, shipped?.transaction_id],
+  )
+
+  // Which staged row is the truck this flow just loaded. Without this the
+  // screen offered a column of identical Ship buttons and the operator — or an
+  // automated click — took the first one, which is not necessarily theirs.
+  const isThisTruck = (row: any) =>
+    loadTxn && String(row.transaction_id) === String(loadTxn.transaction_id)
+  const rows = [...(staged.data ?? [])].sort(
+    (a, b) => Number(isThisTruck(b)) - Number(isThisTruck(a)),
+  )
+  const others = rows.filter((row) => !isThisTruck(row)).length
 
   async function ship(stageId: number) {
     setBusy(true)
+    setConfirming(null)
     try {
       const txn = await api.post<any>(`/api/shipments/${stageId}/ship`, {})
       toast.push('success', 'Shipped', `Transaction ${txn.transaction_id}`)
@@ -656,28 +951,86 @@ function ShipStep({
       staged.reload()
       bol.reload()
     } catch (error) {
-      toast.push('error', 'Ship failed', (error as Error).message)
+      toast.push('error', 'Not shipped', (error as Error).message)
     } finally { setBusy(false) }
   }
 
   return (
     <div className="grid cols-2">
-      <Card title="Ship" subtitle="Complete the shipment for this order" tight>
+      <Card
+        title="Ship"
+        subtitle={
+          loadTxn
+            ? `Trailer ${loadTxn.trailer_number || '—'} — the one you just loaded`
+            : 'Staged trailers on this order'
+        }
+        tight
+      >
+        {loadTxn && others > 0 && (
+          <div style={{ margin: '0 0 12px' }}>
+            <Alert tone="info" title={`${others} other trailer${others === 1 ? '' : 's'} staged on this order`}>
+              Yours is at the top, marked <strong>this truck</strong>. Shipping one of the
+              others asks first.
+            </Alert>
+          </div>
+        )}
+        {confirming && (
+          <div style={{ margin: '0 0 12px' }}>
+            <Alert tone="warn" title={`Ship trailer ${confirming.trailer_number || '—'}?`}>
+              That is not the trailer you loaded in this flow. It carries{' '}
+              {fmtLbs(confirming.quantity)} lbs on BOL {confirming.bol_number}, loaded by{' '}
+              {confirming.loaded_by || 'someone else'}.
+              <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                <button className="sm primary" disabled={busy} onClick={() => ship(confirming.stage_id)}>
+                  Yes, ship trailer {confirming.trailer_number || '—'}
+                </button>
+                <button className="sm" onClick={() => setConfirming(null)}>Cancel</button>
+              </div>
+            </Alert>
+          </div>
+        )}
         {staged.loading ? <Loading /> : (
           <DataTable
-            rows={staged.data ?? []}
+            rows={rows}
             rowKey={(row) => row.stage_id}
             empty={shipped ? 'Shipped — nothing left staged.' : 'Nothing staged for this order.'}
             columns={[
-              { key: 'trailer_number', label: 'Trailer' },
+              {
+                key: 'trailer_number',
+                label: 'Trailer',
+                render: (row) => (
+                  <span className="row" style={{ gap: 8 }}>
+                    {row.trailer_number}
+                    {isThisTruck(row) && <Badge tone="ok">this truck</Badge>}
+                  </span>
+                ),
+              },
               { key: 'bol_number', label: 'BOL' },
+              {
+                key: 'material_number',
+                label: 'Product',
+                render: (row) => (
+                  <span>
+                    {row.material_number} {row.material_description}
+                    {row.order_material_number && row.order_material_number !== row.material_number && (
+                      <Badge tone="warn">not the ordered product</Badge>
+                    )}
+                  </span>
+                ),
+              },
               { key: 'quantity', label: 'Lbs', numeric: true, render: (row) => fmtLbs(row.quantity) },
               {
                 key: 'go',
                 label: '',
                 render: (row) => (
-                  <button className="primary" disabled={busy} onClick={() => ship(row.stage_id)}>
-                    Ship
+                  <button
+                    className={isThisTruck(row) || !loadTxn ? 'primary' : ''}
+                    disabled={busy}
+                    onClick={() => (isThisTruck(row) || !loadTxn
+                      ? ship(row.stage_id)
+                      : setConfirming(row))}
+                  >
+                    Ship {row.trailer_number || ''}
                   </button>
                 ),
               },
@@ -688,19 +1041,38 @@ function ShipStep({
 
       <Card
         title="Bill of lading"
+        subtitle={bol.data?.single_load ? 'This trailer' : 'Every load on this order'}
         actions={<button className="sm" onClick={() => window.print()}>Print</button>}
       >
         {bol.loading ? <Loading /> : bol.error ? <ErrorBox error={bol.error} /> : (
-          <div className="stack">
+          <div className="stack printable" id="bol-print">
             <div>
               <strong>{bol.data.shipper.name}</strong>
               <div className="small muted">{bol.data.shipper.address}</div>
             </div>
+            {bol.data.material_mismatch && (
+              <Alert tone="warn" title="This load is not the product on the order">
+                The order is for {bol.data.order.material_one_number}{' '}
+                {bol.data.order.material_one_description}. What is on the trailer is printed
+                below. Check before the driver leaves.
+              </Alert>
+            )}
             <dl className="kv">
               <dt>Consigned to</dt><dd>{bol.data.order.customer_name ?? '—'}</dd>
               <dt>Order</dt><dd>{bol.data.order.order_id}</dd>
+              <dt>BOL</dt>
+              <dd className="mono">{bol.data.loads.map((l: any) => l.bol_number).join(', ') || '—'}</dd>
+              <dt>Trailer</dt>
+              <dd>{[...new Set(bol.data.loads.map((l: any) => l.trailer_number))].join(', ') || '—'}</dd>
+              {/* The product on the paperwork is the product on the truck. It
+                  used to be read off the order header, which is the same thing
+                  right up until the day it is not. */}
               <dt>Product</dt>
-              <dd>{bol.data.order.material_one_number} {bol.data.order.material_one_description}</dd>
+              <dd>
+                {bol.data.products.length
+                  ? bol.data.products.map((p: any) => `${p.number} ${p.description}`).join(', ')
+                  : '—'}
+              </dd>
               <dt>Quantity</dt><dd className="num">{fmtLbs(bol.data.total_quantity)} lbs</dd>
               <dt>Complete</dt><dd className="num">{fmtNumber(bol.data.order.percent_complete, 1)}%</dd>
             </dl>

@@ -106,6 +106,19 @@ def execute(sql: str, params: Sequence[Any] | dict[str, Any] = (), conn=None) ->
     return cur.lastrowid if cur.lastrowid else cur.rowcount
 
 
+def affected(sql: str, params: Sequence[Any] | dict[str, Any] = (), conn=None) -> int:
+    """Run a statement; return how many rows it actually changed.
+
+    :func:`execute` returns ``lastrowid`` when there is one, and sqlite keeps
+    the last insert's id on the connection — so a conditional UPDATE that
+    matched nothing still came back truthy. Anything using "did this UPDATE
+    win?" as a guard must use this instead.
+    """
+
+    conn = conn or get_connection()
+    return conn.execute(sql, params).rowcount
+
+
 def executemany(sql: str, rows: Iterable[Sequence[Any]], conn=None) -> None:
     conn = conn or get_connection()
     conn.executemany(sql, rows)
@@ -157,6 +170,41 @@ def is_empty(conn: sqlite3.Connection | None = None) -> bool:
 #: (table, column, DDL) and is applied only when the column is absent.
 MIGRATIONS: list[tuple[str, str, str]] = [
     ("app_user", "pin_hash", "ALTER TABLE app_user ADD COLUMN pin_hash TEXT NOT NULL DEFAULT ''"),
+    (
+        "inventory_transaction",
+        "idempotency_key",
+        "ALTER TABLE inventory_transaction ADD COLUMN idempotency_key TEXT",
+    ),
+    (
+        "pending_shipment",
+        "cancelled",
+        "ALTER TABLE pending_shipment ADD COLUMN cancelled INTEGER NOT NULL DEFAULT 0",
+    ),
+    (
+        "qc",
+        "acknowledged_warnings",
+        "ALTER TABLE qc ADD COLUMN acknowledged_warnings INTEGER NOT NULL DEFAULT 0",
+    ),
+    ("qc", "warning_snapshot", "ALTER TABLE qc ADD COLUMN warning_snapshot TEXT NOT NULL DEFAULT ''"),
+    ("audit_log", "order_id", "ALTER TABLE audit_log ADD COLUMN order_id INTEGER"),
+    (
+        "qa_question",
+        "stage",
+        "ALTER TABLE qa_question ADD COLUMN stage TEXT NOT NULL DEFAULT 'post_load'",
+    ),
+    (
+        "qa_header",
+        "stage",
+        "ALTER TABLE qa_header ADD COLUMN stage TEXT NOT NULL DEFAULT 'post_load'",
+    ),
+]
+
+#: Indexes that must exist alongside the migrated columns. ``CREATE INDEX IF
+#: NOT EXISTS`` is safe to re-run, so these are applied unconditionally.
+MIGRATION_INDEXES: list[str] = [
+    "CREATE UNIQUE INDEX IF NOT EXISTS ux_txn_idempotency"
+    " ON inventory_transaction (idempotency_key) WHERE idempotency_key IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_audit_order ON audit_log (order_id)",
 ]
 
 
@@ -176,6 +224,9 @@ def apply_migrations(conn: sqlite3.Connection | None = None) -> list[str]:
             continue
         conn.execute(ddl)
         applied.append(f"{table}.{column}")
+    if "inventory_transaction" in existing and "audit_log" in existing:
+        for ddl in MIGRATION_INDEXES:
+            conn.execute(ddl)
     return applied
 
 

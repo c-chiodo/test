@@ -147,6 +147,20 @@ def progress(order_id: int, order_type_id: int, conn=None) -> dict[str, Any]:
     if not codes:
         return {"qty_fulfilled": 0.0, "percent_complete": 0.0, "qty_shipped": 0.0}
     marks = ", ".join("?" for _ in codes)
+    # Only the ordered product counts. Counting every material meant a load
+    # from the wrong tank showed the order progressing — the order looked
+    # fulfilled while the customer's product was still in the yard.
+    material_id = db.scalar(
+        'SELECT material_one_id FROM "order" WHERE order_id = ?', (order_id,), conn
+    )
+    material_clause = ""
+    material_params: list[Any] = []
+    if material_id:
+        material_clause = """
+          AND (CASE WHEN tt.code = 'RECEIVE' OR tt.code = 'PRODUCE'
+                    THEN t.to_material_id ELSE t.from_material_id END) = ?
+        """
+        material_params = [material_id]
     fulfilled = db.scalar(
         f"""
         SELECT COALESCE(SUM(CASE WHEN tt.code = 'RECEIVE' OR tt.code = 'PRODUCE'
@@ -155,8 +169,9 @@ def progress(order_id: int, order_type_id: int, conn=None) -> dict[str, Any]:
         JOIN transaction_type tt ON tt.transaction_type_id = t.transaction_type_id
         WHERE t.order_id = ? AND t.voided = 0 AND t.is_reversal = 0
           AND tt.code IN ({marks})
+          {material_clause}
         """,
-        [order_id, *codes],
+        [order_id, *codes, *material_params],
         conn,
     )
     shipped = db.scalar(
@@ -173,9 +188,14 @@ def progress(order_id: int, order_type_id: int, conn=None) -> dict[str, Any]:
         'SELECT material_one_quantity FROM "order" WHERE order_id = ?', (order_id,), conn
     ) or 0
     pct = (fulfilled / ordered * 100.0) if ordered else 0.0
+    # Signed, deliberately: clamping the remainder at zero hid the case that
+    # most needs saying, which is that the order is already over-loaded.
+    remaining = round(float(ordered) - float(fulfilled), 2)
     return {
         "qty_fulfilled": round(float(fulfilled), 2),
         "qty_shipped": round(float(shipped), 2),
+        "qty_remaining": remaining,
+        "over_by": round(-remaining, 2) if remaining < -0.01 else 0.0,
         "percent_complete": round(min(pct, 999.0), 2),
     }
 

@@ -282,10 +282,19 @@ function Activity({ order, onChanged, canVoid }: { order: Detail; onChanged: () 
             { key: 'remarks', label: 'Remarks' },
             {
               key: 'actions', label: '',
-              render: (row) => canVoid ? (
+              // The server decides: a supervisor may reverse anything, and an
+              // operator may reverse their own recent unshipped posting. When
+              // they may not, say so — rendering nothing left an operator
+              // looking at their own mistake with no button and no reason.
+              render: (row) => (row.can_void ?? canVoid) ? (
                 <button className="ghost sm" onClick={(event) => { event.stopPropagation(); setVoiding(row) }}>
                   Void
                 </button>
+              ) : row.void_blocked ? (
+                <div className="stack" style={{ gap: 2 }}>
+                  <button className="ghost sm" disabled>Void</button>
+                  <span className="small muted">{row.void_blocked}</span>
+                </div>
               ) : null,
             },
           ]}

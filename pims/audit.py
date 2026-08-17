@@ -20,6 +20,7 @@ def record(
     action: str,
     entity: str,
     entity_id: Any,
+    order_id: int | None = None,
     summary: str = "",
     detail: dict[str, Any] | None = None,
     conn=None,
@@ -32,6 +33,7 @@ def record(
             "action": action,
             "entity": entity,
             "entity_id": str(entity_id),
+            "order_id": int(order_id) if order_id else None,
             "summary": summary,
             "detail_json": json.dumps(detail or {}, default=str),
         },
@@ -61,6 +63,30 @@ def for_entity(entity: str, entity_id: Any, limit: int = 100, conn=None) -> list
         LIMIT ?
         """,
         (entity, str(entity_id), limit),
+        conn,
+    )
+    return [_hydrate(r) for r in rows]
+
+
+def for_order(order_id: int, limit: int = 200, conn=None) -> list[dict]:
+    """Everything that happened to an order, not only edits to the order row.
+
+    Loads, ships, voids and QC records are recorded against their own entity,
+    which is correct — but a supervisor asking "what did the operator do to
+    this order?" wants them in one list, in order, which is what this returns.
+    """
+
+    rows = db.query(
+        """
+        SELECT audit_id, occurred_at, username, action, entity, entity_id,
+               summary, detail_json
+        FROM audit_log
+        WHERE order_id = ?
+           OR (entity = 'order' AND entity_id = ?)
+        ORDER BY audit_id DESC
+        LIMIT ?
+        """,
+        (int(order_id), str(order_id), limit),
         conn,
     )
     return [_hydrate(r) for r in rows]

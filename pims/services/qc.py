@@ -12,14 +12,16 @@ save, training staff either to type placeholder numbers or to click through
 validation. Here the required analytes come from ``material_test`` for the
 order's material, and each warning names the product it applies to.
 
-Warnings do not block a save: QC staff legitimately record partial results. But
-saving over an open warning is recorded — ``acknowledged_warnings`` lands in the
-audit trail, so "we always click through that box" becomes visible instead of
+Warnings do not stop a save, but they do have to be answered: the save is
+refused until ``acknowledge_warnings`` says a person looked at them, and the
+acknowledgement is written onto the record beside a snapshot of what they were
+looking at. "We always click through that box" is then visible rather than
 invisible.
 """
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .. import audit, db
@@ -208,10 +210,11 @@ def save(
 ) -> dict:
     """Create or update a QC record.
 
-    Warnings are advisory; ``acknowledge_warnings`` records that the operator
-    saw them and saved anyway. Values that fail a hard check (a negative
-    moisture, a pH of 47) are rejected outright — the legacy screen accepted
-    them.
+    A save carrying warnings is refused until ``acknowledge_warnings`` says
+    someone reviewed them; the acknowledgement and the warnings themselves are
+    written onto the record. Values that fail a hard check (a negative
+    moisture, a pH of 47, a number that will not parse) are rejected outright —
+    the legacy screen accepted all three.
     """
 
     require_permission(user, "qc.write")
@@ -226,6 +229,12 @@ def save(
     for field in ("moisture", "temp", "ph", "ffa", "tfa", "spintest_fallout"):
         value = to_float(payload.get(field))
         if value is None:
+            # A number that will not parse was thrown away silently, and the
+            # operator got a green "QC recorded" for an empty record. Blank is
+            # still blank; "7.2.1" is a mistake and is said out loud.
+            raw = payload.get(field)
+            if isinstance(raw, str) and raw.strip():
+                hard_errors[field] = f"{raw.strip()!r} is not a number."
             continue
         if value < 0:
             hard_errors[field] = "Cannot be negative."
@@ -240,6 +249,18 @@ def save(
         raise ValidationError("Check the highlighted values.", fields=hard_errors)
 
     check = validate(order_id, payload, conn)
+    # A missing reading is an incomplete record and stays advisory — QC staff
+    # legitimately save partial results and come back. A reading that is
+    # *outside spec* is a decision, and the server asks for it to be made
+    # rather than trusting one client to have asked.
+    out_of_spec = [w for w in check["warnings"] if w["severity"] == "out_of_spec"]
+    if out_of_spec and not acknowledge_warnings:
+        raise BusinessRuleError(
+            "This result is outside spec. Confirm you have reviewed it before saving.",
+            rule="unacknowledged_warnings",
+            warnings=out_of_spec,
+            acknowledge_field="acknowledge_warnings",
+        )
 
     sample_number = (payload.get("sample_number") or "").strip()
     if not sample_number and not qc_id:
@@ -265,6 +286,11 @@ def save(
         "blend_serial_number": payload.get("blend_serial_number")
         or order["blend_serial_number"],
         "comments": payload.get("comments") or "",
+        # Kept on the record, not only in the audit detail: re-opening a QC
+        # record should show that someone signed off on the exception and what
+        # the exception was at the time.
+        "acknowledged_warnings": 1 if (out_of_spec and acknowledge_warnings) else 0,
+        "warning_snapshot": json.dumps(out_of_spec) if out_of_spec else "",
     }
 
     with db.transaction(conn):
@@ -300,6 +326,7 @@ def save(
             action=f"qc.{action}",
             entity="qc",
             entity_id=qc_id,
+            order_id=order_id,
             summary=summary,
             detail=detail,
             conn=conn,
@@ -329,6 +356,7 @@ def void(qc_id: int, reason: str, user: dict, conn=None) -> dict:
             action="qc.void",
             entity="qc",
             entity_id=qc_id,
+            order_id=record["order_id"],
             summary=f"Voided QC {qc_id}",
             detail={"reason": reason, "order_id": record["order_id"]},
             conn=conn,
@@ -384,6 +412,7 @@ def add_in_process(order_id: int, payload: dict, user: dict, conn=None) -> dict:
         action="qc.in_process",
         entity="qc_in_process",
         entity_id=reading_id,
+        order_id=order_id,
         summary=f"In-process {analyte} reading on order {order_id}",
         detail={"order_id": order_id},
         conn=conn,
@@ -414,24 +443,44 @@ def qa_checklists(order_id: int, conn=None) -> list[dict]:
             (header["header_id"],),
             conn,
         )
+        # "No" is a finding; "N/A" is a deliberate answer that the question did
+        # not apply. Both are reported, separately — collapsing N/A into
+        # silence lost the difference between "checked, does not apply" and
+        # "never asked".
         header["exceptions"] = [
             r["question"] for r in header["responses"] if r["response"] == "No"
+        ]
+        header["not_applicable"] = [
+            r["question"] for r in header["responses"] if _is_na(r["response"])
         ]
     return headers
 
 
-def save_qa_checklist(order_id: int, payload: dict, user: dict, conn=None) -> dict:
+def _is_na(response: str | None) -> bool:
+    return str(response or "").strip().upper() in {"N/A", "NA", "NOT APPLICABLE"}
+
+
+def checklist_questions(stage: str | None = None, conn=None) -> list[dict]:
+    """The enabled checklist questions, optionally for one stage of the load."""
+
+    sql = (
+        "SELECT question_id, question, answer_type, stage, sort_order"
+        " FROM qa_question WHERE enabled = 1"
+    )
+    params: list[Any] = []
+    if stage:
+        sql += " AND stage = ?"
+        params.append(stage)
+    return db.query(sql + " ORDER BY sort_order", params, conn)
+
+
+def save_qa_checklist(
+    order_id: int, payload: dict, user: dict, conn=None, stage: str | None = None
+) -> dict:
     require_permission(user, "qc.write")
     order = _order(order_id, conn)
     responses = payload.get("responses") or {}
-    questions = {
-        q["question_id"]: q
-        for q in db.query(
-            "SELECT question_id, question, answer_type FROM qa_question WHERE enabled = 1",
-            (),
-            conn,
-        )
-    }
+    questions = {q["question_id"]: q for q in checklist_questions(stage, conn)}
     unanswered = [
         q["question"]
         for qid, q in questions.items()
@@ -439,7 +488,8 @@ def save_qa_checklist(order_id: int, payload: dict, user: dict, conn=None) -> di
     ]
     if unanswered:
         raise ValidationError(
-            "Answer every checklist question before saving.",
+            "Answer every checklist question before saving. "
+            "Mark anything that does not apply as N/A.",
             fields={"responses": "; ".join(unanswered)},
         )
 
@@ -453,6 +503,7 @@ def save_qa_checklist(order_id: int, payload: dict, user: dict, conn=None) -> di
                 "trailer_number": payload.get("trailer_number") or "",
                 "trailer_load_time": payload.get("trailer_load_time"),
                 "comments": payload.get("comments") or "",
+                "stage": stage or "post_load",
                 "date_added": utc_now_iso(),
                 "added_by": user["username"],
             },
@@ -475,6 +526,7 @@ def save_qa_checklist(order_id: int, payload: dict, user: dict, conn=None) -> di
             action="qa.checklist",
             entity="qa_header",
             entity_id=header_id,
+            order_id=order_id,
             summary=f"QA checklist completed on order {order_id}",
             detail={"failures": failures, "order_id": order_id},
             conn=conn,

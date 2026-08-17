@@ -175,7 +175,7 @@ def test_points(plant_id: int | None = None, conn=None) -> list[dict]:
 
 def qa_questions(conn=None) -> list[dict]:
     return db.query(
-        "SELECT question_id, question, answer_type FROM qa_question"
+        "SELECT question_id, question, answer_type, stage FROM qa_question"
         " WHERE enabled = 1 ORDER BY sort_order, question_id",
         (),
         conn,
