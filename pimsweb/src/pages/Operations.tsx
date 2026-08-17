@@ -77,6 +77,8 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
   const [error, setError] = useState<any>(null)
   const [busy, setBusy] = useState(false)
   const [posted, setPosted] = useState<Transaction | null>(null)
+  const [suggestion, setSuggestion] = useState<{ values: Record<string, any>; notes: string[] } | null>(null)
+  const [reading, setReading] = useState<any>(null)
 
   useEffect(() => {
     setForm((current) => ({
@@ -86,7 +88,44 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
     }))
     setPosted(null)
     setError(null)
+    setSuggestion(null)
   }, [spec.key, plantId])
+
+  // Ask the server what this screen should already know, and why.
+  useEffect(() => {
+    let cancelled = false
+    api.get<{ values: Record<string, any>; notes: string[] }>(
+      `/api/prefill/${spec.key}${qs({ order_id: form.order_id, plant_id: plantId })}`,
+    )
+      .then((result) => {
+        if (cancelled) return
+        setSuggestion(result)
+        const { bol_preview: _preview, ...values } = result.values
+        setForm((current) => {
+          const merged = { ...current }
+          for (const [key, value] of Object.entries(values)) {
+            if (merged[key] === '' || merged[key] === undefined || merged[key] === null) {
+              merged[key] = value
+            }
+          }
+          return merged
+        })
+      })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [spec.key, plantId, form.order_id])
+
+  // The most recent unused weigh-out, for the screens that take a quantity.
+  useEffect(() => {
+    if (!spec.from && !spec.to) return undefined
+    let cancelled = false
+    api.get<{ reading: any }>(
+      `/api/scale/latest${qs({ plant_id: plantId, trailer_number: form.trailer_number })}`,
+    )
+      .then((result) => { if (!cancelled) setReading(result.reading) })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [plantId, spec.key, form.trailer_number, posted?.transaction_id])
 
   const set = (patch: Record<string, any>) => setForm((current) => ({ ...current, ...patch }))
 
@@ -131,6 +170,9 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
       const payload: Record<string, any> = { plant_id: plantId, ...form }
       for (const key of Object.keys(payload)) if (payload[key] === '') payload[key] = null
       if (spec.key === 'produce' && !payload.to_qty) payload.to_qty = payload.from_qty
+      if (reading && Number(payload.from_qty ?? payload.to_qty) === (reading.net_lbs ?? reading.gross_lbs)) {
+        payload.scale_reading_id = reading.reading_id
+      }
       const result = await api.post<Transaction>(`/api/transactions/${spec.key}`, payload)
       setPosted(result)
       toast.push('success', `${spec.label} posted`, `Transaction ${result.transaction_id}`)
@@ -298,6 +340,32 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
               <input value={form.remarks} onChange={(event) => set({ remarks: event.target.value })} />
             </Field>
           </div>
+
+          {suggestion?.notes.length ? (
+            <div className="why">
+              {suggestion.notes.map((note, index) => <span key={index}>{note}</span>)}
+            </div>
+          ) : null}
+
+          {reading && (
+            <div style={{ marginTop: 12 }}>
+              <Alert tone="info" title={`Scale: ${fmtLbs(reading.net_lbs ?? reading.gross_lbs)} lbs waiting`}>
+                {reading.trailer_number ? `Trailer ${reading.trailer_number} · ` : ''}
+                captured {fmtDateTime(reading.captured_at)}.{' '}
+                <button
+                  className="sm"
+                  style={{ marginLeft: 6 }}
+                  onClick={() => set(
+                    spec.from
+                      ? { from_qty: reading.net_lbs ?? reading.gross_lbs, to_qty: reading.net_lbs ?? reading.gross_lbs }
+                      : { to_qty: reading.net_lbs ?? reading.gross_lbs },
+                  )}
+                >
+                  Use this weight
+                </button>
+              </Alert>
+            </div>
+          )}
 
           <div className="row end" style={{ marginTop: 16 }}>
             {posted?.order_id && (

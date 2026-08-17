@@ -415,3 +415,86 @@ CREATE TABLE IF NOT EXISTS system_setting (
     value       TEXT NOT NULL,
     description TEXT NOT NULL DEFAULT ''
 );
+
+-- ------------------------------------------------- automation (added v1.1)
+
+-- Counters behind generated BOL and sample numbers. Kept in the database
+-- rather than derived from MAX(), so two loadout terminals cannot mint the
+-- same number in the same second.
+CREATE TABLE IF NOT EXISTS number_sequence (
+    key        TEXT PRIMARY KEY,
+    next_value INTEGER NOT NULL DEFAULT 1
+);
+
+-- Alerts. `fingerprint` is what makes a condition the *same* condition on the
+-- next run, so a trailer that has been sitting for a week is reported once and
+-- then goes quiet instead of paging someone nightly.
+CREATE TABLE IF NOT EXISTS alert_log (
+    alert_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    created_at  TEXT NOT NULL,
+    rule        TEXT NOT NULL,
+    severity    TEXT NOT NULL,               -- info | warning | critical
+    subject     TEXT NOT NULL,
+    body        TEXT NOT NULL DEFAULT '',
+    fingerprint TEXT NOT NULL,
+    plant_id    INTEGER REFERENCES plant(plant_id),
+    entity      TEXT NOT NULL DEFAULT '',
+    entity_id   TEXT NOT NULL DEFAULT '',
+    channel     TEXT NOT NULL DEFAULT '',
+    delivered   INTEGER NOT NULL DEFAULT 0,
+    error       TEXT NOT NULL DEFAULT '',
+    acknowledged_at TEXT,
+    acknowledged_by TEXT
+);
+
+CREATE INDEX IF NOT EXISTS ix_alert_fingerprint ON alert_log (fingerprint);
+CREATE INDEX IF NOT EXISTS ix_alert_created     ON alert_log (created_at);
+
+-- Standing orders: the thing the legacy "# of orders to create" box was a
+-- manual stand-in for.
+CREATE TABLE IF NOT EXISTS recurring_order (
+    recurring_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name         TEXT NOT NULL,
+    template     TEXT NOT NULL,              -- JSON order payload
+    cadence      TEXT NOT NULL,              -- daily | weekly | monthly
+    weekday      INTEGER,                    -- 0=Monday, for weekly
+    day_of_month INTEGER,                    -- for monthly
+    lead_days    INTEGER NOT NULL DEFAULT 0, -- due date = run date + lead
+    next_run     TEXT NOT NULL,
+    last_run     TEXT,
+    last_order_id INTEGER,
+    active       INTEGER NOT NULL DEFAULT 1,
+    added_by     TEXT NOT NULL,
+    date_added   TEXT NOT NULL
+);
+
+-- Weights posted by a truck-scale agent, waiting to be attached to a load.
+CREATE TABLE IF NOT EXISTS scale_reading (
+    reading_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    plant_id     INTEGER NOT NULL REFERENCES plant(plant_id),
+    scale_id     TEXT NOT NULL DEFAULT '',
+    trailer_number TEXT NOT NULL DEFAULT '',
+    gross_lbs    REAL,
+    tare_lbs     REAL,
+    net_lbs      REAL,
+    captured_at  TEXT NOT NULL,
+    received_at  TEXT NOT NULL,
+    source       TEXT NOT NULL DEFAULT 'agent',
+    consumed_by  INTEGER REFERENCES inventory_transaction(transaction_id)
+);
+
+CREATE INDEX IF NOT EXISTS ix_scale_plant ON scale_reading (plant_id, captured_at);
+
+-- Record of every integration run, so "did the LIMS job run last night?" is a
+-- query rather than a hunt through logs.
+CREATE TABLE IF NOT EXISTS job_run (
+    run_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    job        TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    status     TEXT NOT NULL DEFAULT 'running',   -- running | ok | failed
+    detail     TEXT NOT NULL DEFAULT '{}',
+    error      TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS ix_job_run ON job_run (job, started_at);

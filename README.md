@@ -102,6 +102,13 @@ To look around without running anything, `cd pimsweb && npm run build:demo`
 builds a single self-contained HTML file that opens in a browser with the
 seeded data and the rules running in the page.
 
+It automates the parts operators used to type: BOL and sample numbers are
+generated, plant-floor screens arrive pre-filled with the reason shown, a truck
+scale can post weights straight into a load, one scan box resolves any barcode
+on the floor, and a shared terminal signs in with a PIN and signs itself out.
+Scheduled jobs close finished orders, raise standing orders, pull LIMS and GP
+data, and raise alerts for a stale lab feed or a trailer that never shipped.
+
 The second half of the job is being able to support it: a health endpoint per
 dependency, a data-quality probe that lists the rows behind each finding, an
 audit trail with before/after values, and correlation ids that tie a user's

@@ -188,3 +188,117 @@ revision; no schema migration ships without a documented reverse. If a release
 introduced a rule change (as build 1.2.23.0 did), the rule is in
 `pims/services/`, the test that pins it is in `tests/`, and `git log` on that
 file answers "when did this change and why" without a decompiler.
+
+## 12. Generated numbers
+
+PIMS mints BOL and sample numbers rather than asking an operator to type them.
+Both formats are settings, not code:
+
+| Setting | Default | Notes |
+|---|---|---|
+| `bol.prefix` / `bol.format` | `001-` / `{prefix}{sequence:06d}-1` | Matches the legacy series (`001-111585-1`) |
+| `bol.append_trailer` | `true` | Adds `(614)`, as the legacy numbers do |
+| `bol.auto_generate` | `true` | Set `false` and the old "enter the BOL number" rule returns |
+| `sample.format` | `{plant}{party}D{date}Q{sequence:07d}` | Reconstructed from `DMC1359D251216Q0360397`; `C`=customer, `A`=vendor |
+| `sample.auto_generate` | **`false`** | See the warning below |
+
+Counters live in `number_sequence` and start above the legacy series so a
+generated number cannot collide with a historical one. At cutover, set them
+past the highest number already issued:
+
+```python
+from pims.services import numbering
+numbering.seed_sequence("bol", 112_500)
+numbering.seed_sequence("sample", 400_000)
+```
+
+> **Confirm the sample scheme with the lab before enabling `sample.auto_generate`.**
+> The format here is reconstructed from sample codes in the legacy data. If PIMS
+> mints a code LabWare does not recognise, you have traded a typo problem for a
+> matching problem — which is harder to see. Until it is confirmed, the QC screen
+> offers a **Generate** button and the operator decides.
+
+## 13. Scheduled jobs
+
+Everything runs through `python -m pims`, every run is recorded in `job_run`,
+and every job takes `--dry-run`.
+
+```cron
+*/10 * * * *  cd /srv/pims && .venv/bin/python -m pims jobs frequent   >> /var/log/pims/jobs.log 2>&1
+0    */2 * * * cd /srv/pims && .venv/bin/python -m pims lims-sync       >> /var/log/pims/lims.log 2>&1
+30   5   * * * cd /srv/pims && .venv/bin/python -m pims gp-sync --file /srv/pims/exchange/gp.json
+0    6   * * * cd /srv/pims && .venv/bin/python -m pims jobs daily      >> /var/log/pims/jobs.log 2>&1
+```
+
+| Job | Does |
+|---|---|
+| `jobs frequent` | evaluates the alert rules only |
+| `jobs daily` | standing orders → auto-close → alerts → digest → session cleanup |
+| `jobs auto-close` | closes orders that are fulfilled, shipped and QC'd |
+| `jobs recurring` | creates the orders standing orders are due to raise |
+| `lims-sync` | pulls current, reportable LIMS results into the projection |
+| `gp-sync` | pulls Great Plains customers, vendors and order headers |
+
+Check they are running: **Support console → Scheduled jobs**, or
+`python -m pims jobs status`. Any job can also be run from that screen, with a
+dry run first — the same code cron calls.
+
+**Auto-close is conservative and still worth reviewing before you trust it.**
+It requires `autoclose.min_percent` (default 99) fulfilment, nothing staged and
+unshipped, a shipped quantity on sales orders, and — with
+`autoclose.require_qc` on — a QC record. Run `python -m pims jobs auto-close
+--dry-run` and read `would_close` before enabling it in production.
+
+## 14. Alerts
+
+Rules read the checks that already exist: LIMS freshness, out-of-spec QC,
+trailers loaded and not shipped, tanks over 95%, and product-setup gaps.
+
+| Setting | Default | Notes |
+|---|---|---|
+| `alerts.webhook_url` | *(blank)* | A Teams or Slack incoming webhook. Blank = record only |
+| `alerts.min_severity` | `warning` | `info` / `warning` / `critical` — everything is recorded regardless |
+| `alerts.repeat_hours` | `24` | The same condition is not re-sent inside this window |
+
+A condition is identified by a fingerprint (this stage, this QC record), so a
+trailer that has been sitting since Tuesday is reported once, not nightly.
+**Support console → Alerts** lists what fired, whether it was delivered, and
+lets you acknowledge it. A failed delivery is stored with the error rather than
+dropped.
+
+## 15. Kiosk terminals
+
+A shared loadout screen runs the same app in kiosk mode: bigger targets, PIN
+sign-in, only the operator screens, and an automatic sign-out after three
+minutes idle.
+
+1. Open PIMS on the terminal and go to `#/kiosk` (or press **Kiosk** in the top
+   bar). Pick the plant once — it is remembered on that device.
+2. Give each operator a PIN:
+   ```python
+   from pims import db, security
+   db.init_db(); security.set_pin("toperator", "5588")
+   ```
+   Only users with a PIN *and* access to that plant appear in the picker.
+3. Sessions from a PIN last `PIMS_KIOSK_SESSION_MINUTES` (default 30) rather
+   than the usual 12 hours.
+
+The PIN identifies who did the work in the audit trail. It is not a password:
+keep the terminal on the plant network, and use the full sign-in for anything
+outside the operator screens.
+
+## 16. Integrations
+
+| Integration | Adapter | Switch to production by |
+|---|---|---|
+| LIMS results | `lims_ingest.StubSource` (fills gaps from QC records) | `python -m pims lims-sync --mode sqlserver --dsn "<ODBC DSN>"` |
+| Truck scale | `scripts/pims_scale_agent.py --source simulate` | `--source serial --port /dev/ttyUSB0` or `--source tcp --host <indicator>` |
+| Great Plains | `gp_sync.StubSource` | `python -m pims gp-sync --file /path/to/export.json`, or write an adapter |
+
+The scale agent posts to `/api/scale/readings` with a token belonging to a user
+that can post transactions. A reading is a suggestion: the loadout screen offers
+it, and it is marked consumed by the transaction that uses it, so the same
+weigh-out cannot be applied twice.
+
+If an integration stops, the job status goes stale in the support console before
+anyone notices missing data — that is the point of recording every run.

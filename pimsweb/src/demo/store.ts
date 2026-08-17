@@ -23,6 +23,7 @@ export interface Store {
   material_spec: Row[]
   location_type: Row[]
   location: Row[]
+  location_default: Row[]
   customer: Row[]
   vendor: Row[]
   partner_requirement: Row[]
@@ -42,11 +43,27 @@ export interface Store {
   app_user: Row[]
   user_plant_access: Row[]
   audit_log: Row[]
+  // Automation state the sandbox keeps in memory alongside the seeded data.
+  number_sequence: Row[]
+  alert_log: Row[]
+  recurring_order: Row[]
+  scale_reading: Row[]
+  job_run: Row[]
 }
 
 export const store: Store = {
   ...(dataset as unknown as Store),
   audit_log: [],
+  // Counters start above the seeded series so a generated number never
+  // collides with a historical one, exactly as the server seeds them.
+  number_sequence: [
+    { key: 'bol', next_value: 112_000 },
+    { key: 'sample', next_value: 400_000 },
+  ],
+  alert_log: [],
+  recurring_order: [],
+  scale_reading: [],
+  job_run: [],
 }
 
 /** Next id for a table, so created rows keep climbing like the real sequences. */

@@ -22,7 +22,12 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__, audit, db, health, observability, security
 from .config import get_settings
 from .errors import AuthError, PimsError
-from .services import inquiry, inventory, lims, orders, qc, query, reference, specs
+from .integrations import gp_sync, lims_ingest
+from .integrations import scale as scale_integration
+from .services import (
+    alerts, inquiry, inventory, jobs, lims, numbering, orders, prefill, qc, query,
+    reference, scan, specs,
+)
 from .util import utc_now
 
 settings = get_settings()
@@ -136,6 +141,32 @@ def logout(
     if token:
         security.logout(token)
     return {"ok": True}
+
+
+@app.post("/api/auth/pin", tags=["auth"])
+def login_pin(payload: dict = Body(...)) -> dict:
+    """Kiosk sign-in with a PIN. Sessions are short by design."""
+
+    return security.login_with_pin(
+        (payload.get("username") or "").strip(),
+        str(payload.get("pin") or ""),
+        payload.get("plant_id"),
+    )
+
+
+@app.get("/api/kiosk/plants", tags=["auth"])
+def kiosk_plants() -> list[dict]:
+    """Plants a terminal can be assigned to. Unauthenticated: this is what a
+    kiosk asks before anyone has signed in, and it is only codes and names."""
+
+    return reference.plants()
+
+
+@app.get("/api/auth/kiosk-users", tags=["auth"])
+def kiosk_users(plant_id: int) -> list[dict]:
+    """Operators who can sign in at this plant's terminal. Names only."""
+
+    return security.kiosk_users(plant_id)
 
 
 @app.get("/api/auth/me", tags=["auth"])
@@ -334,6 +365,69 @@ def pending_shipments(
 @app.post("/api/shipments/{stage_id}/ship", tags=["shipping"])
 def ship(stage_id: int, payload: dict = Body(default={}), user: dict = User) -> dict:
     return inventory.ship(stage_id, user, user_date=payload.get("user_date"))
+
+
+# ------------------------------------------------- prefill, numbering, scan
+
+
+@app.get("/api/prefill/qc/{order_id}", tags=["operator"])
+def prefill_qc(order_id: int, user: dict = User) -> dict:
+    """What the QC form should open with for this order."""
+
+    return prefill.for_qc(order_id)
+
+
+@app.get("/api/prefill/{operation}", tags=["operator"])
+def prefill_operation(
+    operation: str,
+    order_id: int | None = None,
+    plant_id: int | None = None,
+    trailer_number: str | None = None,
+    user: dict = User,
+) -> dict:
+    """Suggested values for a plant-floor screen, with why each was suggested."""
+
+    return prefill.for_operation(
+        operation, order_id=order_id, plant_id=plant_id, trailer_number=trailer_number
+    )
+
+
+@app.get("/api/trailers/{trailer_number}/history", tags=["operator"])
+def trailer_history(trailer_number: str, user: dict = User) -> dict:
+    return {
+        "trailer_number": trailer_number,
+        "last_material_hauled": prefill.last_material_hauled(trailer_number),
+        "history": prefill.trailer_history(trailer_number),
+    }
+
+
+@app.get("/api/numbering/preview", tags=["operator"])
+def numbering_preview(order_id: int = 0, user: dict = User) -> dict:
+    return numbering.preview(order_id)
+
+
+@app.post("/api/numbering/sample", tags=["operator"])
+def numbering_sample(payload: dict = Body(...), user: dict = User) -> dict:
+    """Mint a sample number. Deliberately an explicit action — see the runbook."""
+
+    security.require_permission(user, "qc.write")
+    order_id = int(payload["order_id"])
+    sample_number = numbering.next_sample_number(order_id, payload.get("when"))
+    audit.record(
+        username=user["username"],
+        action="numbering.sample",
+        entity="order",
+        entity_id=order_id,
+        summary=f"Generated sample number {sample_number}",
+    )
+    return {"order_id": order_id, "sample_number": sample_number}
+
+
+@app.get("/api/scan", tags=["operator"])
+def scan_code(code: str, plant_id: int | None = None, user: dict = User) -> dict:
+    """Resolve a scanned barcode (or typed code) to what it refers to."""
+
+    return scan.resolve(code, plant_id)
 
 
 # ---------------------------------------------------------------------- QC
@@ -562,6 +656,96 @@ def delete_saved_query(query_id: int, user: dict = User) -> dict:
     return {"ok": True}
 
 
+# ------------------------------------------------- alerts, jobs, integrations
+
+
+@app.get("/api/alerts", tags=["automation"])
+def list_alerts(limit: int = Query(default=50, le=500), user: dict = User) -> dict:
+    return {"alerts": alerts.recent(limit), "settings": alerts.settings_summary()}
+
+
+@app.post("/api/alerts/run", tags=["automation"])
+def run_alerts(payload: dict = Body(default={}), user: dict = User) -> dict:
+    """Evaluate the alert rules now. ``send=false`` is a dry run."""
+
+    security.require_permission(user, "support.read")
+    return alerts.run(payload.get("plant_id"), send=bool(payload.get("send", False)))
+
+
+@app.post("/api/alerts/{alert_id}/acknowledge", tags=["automation"])
+def acknowledge_alert(alert_id: int, user: dict = User) -> dict:
+    security.require_permission(user, "support.read")
+    return alerts.acknowledge(alert_id, user["username"])
+
+
+@app.get("/api/jobs", tags=["automation"])
+def job_status(user: dict = User) -> dict:
+    security.require_permission(user, "support.read")
+    return {"jobs": jobs.health_summary(), "recent": jobs.last_runs(20)}
+
+
+@app.post("/api/jobs/{job}/run", tags=["automation"])
+def run_job(job: str, payload: dict = Body(default={}), user: dict = User) -> dict:
+    """Run a scheduled job on demand — the same code cron calls."""
+
+    security.require_permission(user, "support.read")
+    plant_id = payload.get("plant_id")
+    dry_run = bool(payload.get("dry_run", False))
+    if job == "daily":
+        return jobs.daily(plant_id, send=not dry_run)
+    if job == "alerts":
+        return alerts.run(plant_id, send=not dry_run)
+    if job == "auto-close":
+        return jobs.auto_close(plant_id, dry_run=dry_run)
+    if job == "recurring":
+        return jobs.run_recurring(dry_run=dry_run)
+    if job == "lims-sync":
+        return lims_ingest.sync(
+            since_days=int(payload.get("since_days", 2)), dry_run=dry_run
+        )
+    if job == "gp-sync":
+        return gp_sync.sync(dry_run=dry_run)
+    raise PimsError(f"Unknown job {job!r}.", allowed=[
+        "daily", "alerts", "auto-close", "recurring", "lims-sync", "gp-sync",
+    ])
+
+
+@app.get("/api/recurring", tags=["automation"])
+def list_recurring(include_inactive: bool = False, user: dict = User) -> list[dict]:
+    return jobs.list_recurring(include_inactive)
+
+
+@app.post("/api/recurring", tags=["automation"], status_code=201)
+def create_recurring(payload: dict = Body(...), user: dict = User) -> dict:
+    return jobs.create_recurring(payload, user)
+
+
+@app.delete("/api/recurring/{recurring_id}", tags=["automation"])
+def stop_recurring(recurring_id: int, user: dict = User) -> dict:
+    security.require_permission(user, "order.write")
+    jobs.deactivate_recurring(recurring_id, user)
+    return {"ok": True}
+
+
+@app.post("/api/scale/readings", tags=["automation"], status_code=201)
+def post_scale_reading(payload: dict = Body(...), user: dict = User) -> dict:
+    """Where the plant scale agent posts a weight."""
+
+    security.require_permission(user, "txn.post")
+    return scale_integration.record(payload, user)
+
+
+@app.get("/api/scale/latest", tags=["automation"])
+def latest_scale_reading(
+    plant_id: int,
+    trailer_number: str | None = None,
+    max_age_minutes: int = 120,
+    user: dict = User,
+) -> dict:
+    reading = scale_integration.latest(plant_id, trailer_number, max_age_minutes)
+    return {"reading": reading, "recent": scale_integration.recent(plant_id, 10)}
+
+
 # ----------------------------------------------------------------- support
 
 
@@ -575,7 +759,10 @@ def health_endpoint() -> dict:
 @app.get("/api/support/diagnostics", tags=["support"])
 def diagnostics(user: dict = User) -> dict:
     security.require_permission(user, "support.read")
-    return health.diagnostics()
+    report = health.diagnostics()
+    report["jobs"] = jobs.health_summary()
+    report["alerting"] = alerts.settings_summary()
+    return report
 
 
 @app.get("/api/support/data-quality", tags=["support"])

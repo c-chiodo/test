@@ -8,6 +8,17 @@ The commands support needs at 2am, without a Python REPL:
     python -m pims diagnose         print the health checks (exit 1 if failed)
     python -m pims check            print data-quality findings
     python -m pims audit --limit 20 tail the audit trail
+
+Scheduled work (see docs/PIMS_RUNBOOK.md §13 for the crontab):
+
+    python -m pims jobs daily       standing orders, auto-close, alerts, digest
+    python -m pims jobs frequent    alert rules only — every few minutes
+    python -m pims lims-sync        pull LIMS results into the projection
+    python -m pims gp-sync          pull Great Plains master data
+    python -m pims alerts           evaluate the rules (dry run unless --send)
+
+Every command takes --dry-run where it would change something, and every run is
+recorded in job_run so "did it run?" is answerable from the support console.
 """
 
 from __future__ import annotations
@@ -48,6 +59,26 @@ def main(argv: list[str] | None = None) -> int:
     audit_cmd.add_argument("--limit", type=int, default=20)
     audit_cmd.add_argument("--entity", default=None)
     audit_cmd.add_argument("--entity-id", default=None)
+
+    jobs_cmd = sub.add_parser("jobs", help="run scheduled work")
+    jobs_cmd.add_argument("which", choices=["daily", "frequent", "auto-close", "recurring", "status"])
+    jobs_cmd.add_argument("--plant-id", type=int, default=None)
+    jobs_cmd.add_argument("--dry-run", action="store_true")
+
+    alerts_cmd = sub.add_parser("alerts", help="evaluate alert rules")
+    alerts_cmd.add_argument("--plant-id", type=int, default=None)
+    alerts_cmd.add_argument("--send", action="store_true", help="record and deliver (default is a dry run)")
+    alerts_cmd.add_argument("--digest", action="store_true", help="send the daily digest instead")
+
+    lims_cmd = sub.add_parser("lims-sync", help="pull LIMS results into the projection")
+    lims_cmd.add_argument("--since-days", type=int, default=2)
+    lims_cmd.add_argument("--dry-run", action="store_true")
+    lims_cmd.add_argument("--mode", default=None, help="local | sqlserver (default: PIMS_LIMS_MODE)")
+    lims_cmd.add_argument("--dsn", default=None, help="ODBC DSN for --mode sqlserver")
+
+    gp_cmd = sub.add_parser("gp-sync", help="pull Great Plains master data")
+    gp_cmd.add_argument("--file", default=None, help="JSON export to read instead of the stub")
+    gp_cmd.add_argument("--dry-run", action="store_true")
 
     args = parser.parse_args(argv)
     settings = get_settings()
@@ -98,6 +129,50 @@ def main(argv: list[str] | None = None) -> int:
             _print(audit_module.for_entity(args.entity, args.entity_id, args.limit))
         else:
             _print(audit_module.recent(args.limit))
+        return 0
+
+    if args.command == "jobs":
+        from .services import jobs as jobs_service
+
+        db.init_db(settings)
+        if args.which == "status":
+            _print({"jobs": jobs_service.health_summary(), "recent": jobs_service.last_runs(10)})
+        elif args.which == "daily":
+            _print(jobs_service.daily(args.plant_id, send=not args.dry_run))
+        elif args.which == "frequent":
+            _print(jobs_service.frequent(args.plant_id, send=not args.dry_run))
+        elif args.which == "auto-close":
+            _print(jobs_service.auto_close(args.plant_id, dry_run=args.dry_run))
+        else:
+            _print(jobs_service.run_recurring(dry_run=args.dry_run))
+        return 0
+
+    if args.command == "alerts":
+        from .services import alerts as alerts_service
+
+        db.init_db(settings)
+        if args.digest:
+            _print(alerts_service.send_digest(args.plant_id) if args.send
+                   else alerts_service.digest(args.plant_id))
+        else:
+            _print(alerts_service.run(args.plant_id, send=args.send))
+        return 0
+
+    if args.command == "lims-sync":
+        from .integrations import lims_ingest
+
+        db.init_db(settings)
+        source = lims_ingest.build_source(args.mode, args.dsn)
+        result = lims_ingest.sync(source, since_days=args.since_days, dry_run=args.dry_run)
+        _print(result)
+        return 0 if result.get("freshness", {}).get("status") != "failed" else 1
+
+    if args.command == "gp-sync":
+        from .integrations import gp_sync
+
+        db.init_db(settings)
+        source = gp_sync.FileSource(args.file) if args.file else gp_sync.StubSource()
+        _print(gp_sync.sync(source, dry_run=args.dry_run))
         return 0
 
     parser.error(f"unknown command {args.command}")

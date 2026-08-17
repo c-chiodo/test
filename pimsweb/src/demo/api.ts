@@ -13,6 +13,11 @@
 import {
   Row, byId, hoursSince, nextId, nowIso, store, todayIso,
 } from './store'
+import {
+  alertSettings, consumeScaleReading, evaluateAlerts, jobHealth, latestScaleReading,
+  nextBol, nextSampleNumber, prefillOperation, prefillQc, recordJobRun, recordScaleReading,
+  resolveScan, runAlerts, setting, simulateScaleReading, trailerHistory,
+} from './automation'
 
 /* ----------------------------------------------------------------- errors */
 
@@ -308,6 +313,7 @@ function hydrateTransaction(txn: Row): Row {
 }
 
 function postTransaction(operation: string, payload: Row): Row {
+  /* eslint-disable no-param-reassign */
   const user = requireUser()
   requirePermission(user, 'txn.post')
   const op = operation.toUpperCase()
@@ -363,7 +369,11 @@ function postTransaction(operation: string, payload: Row): Row {
       invalid(`${location.number} belongs to another plant.`, { [key]: 'Location is not at this plant.' })
     }
     if (location.bol_required && key === 'to_location_id' && !payload.to_bol && (op === 'RECEIVE' || op === 'LOAD')) {
-      invalid(`${location.number} requires a BOL number.`, { to_bol: 'Enter the BOL number.' })
+      if (setting('bol.auto_generate', 'true') !== 'false') {
+        payload = { ...payload, to_bol: nextBol(payload.trailer_number) }
+      } else {
+        invalid(`${location.number} requires a BOL number.`, { to_bol: 'Enter the BOL number.' })
+      }
     }
   }
 
@@ -433,6 +443,9 @@ function postTransaction(operation: string, payload: Row): Row {
   }
   store.inventory_transaction.push(row)
 
+  if (payload.scale_reading_id) {
+    consumeScaleReading(Number(payload.scale_reading_id), transactionId)
+  }
   if (op === 'LOAD') {
     store.pending_shipment.push({
       stage_id: nextId('pending_shipment', 'stage_id'),
@@ -945,6 +958,11 @@ function saveQc(orderId: number, payload: Row, qcId: number | null, acknowledge:
   if (Object.keys(hard).length) invalid('Check the highlighted values.', hard)
 
   const check = validateQc(orderId, payload)
+  let sampleNumber = String(payload.sample_number || '').trim()
+  if (!sampleNumber && !qcId
+      && (setting('sample.auto_generate', 'false') === 'true' || payload.generate_sample_number)) {
+    sampleNumber = nextSampleNumber(orderId)
+  }
   const values: Row = {
     bol_number: payload.bol_number || '',
     test_date: String(payload.test_date || todayIso()).slice(0, 10),
@@ -959,7 +977,7 @@ function saveQc(orderId: number, payload: Row, qcId: number | null, acknowledge:
     steam_on: payload.steam_on ? 1 : 0,
     seal_number: payload.seal_number || '',
     last_material_hauled: payload.last_material_hauled || '',
-    sample_number: String(payload.sample_number || '').trim(),
+    sample_number: sampleNumber,
     blend_serial_number: payload.blend_serial_number || order.blend_serial_number,
     comments: payload.comments || '',
   }
@@ -1783,6 +1801,102 @@ function diagnostics(): Row {
   }
 }
 
+/* ------------------------------------------------------------- job runner */
+
+function autoCloseCandidates(plantId: number | null): Row[] {
+  const minPercent = Number(setting('autoclose.min_percent', '99'))
+  const requireQc = setting('autoclose.require_qc', 'true') === 'true'
+  return searchOrders({ plant_id: plantId, open_only: true, limit: 1000 }).rows.filter((order: Row) => {
+    if (order.percent_complete < minPercent) return false
+    if (store.pending_shipment.some((stage) => stage.order_id === order.order_id && !stage.shipped)) return false
+    if (order.order_type === 'SO' && order.qty_shipped <= 0) return false
+    if (requireQc && !store.qc.some((record) => record.order_id === order.order_id && record.active)) return false
+    return true
+  })
+}
+
+function runJob(job: string, dryRun: boolean, plantId: number | null): Row {
+  if (job === 'auto-close') {
+    const ready = autoCloseCandidates(plantId)
+    if (dryRun) {
+      return { enabled: true, dry_run: true, candidates: ready.length, would_close: ready.map((o) => o.order_id) }
+    }
+    const result = closeOrders(ready.map((order) => order.order_id), false)
+    recordJobRun('auto_close', { orders_closed: result.closed.length })
+    return { enabled: true, candidates: ready.length, ...result }
+  }
+  if (job === 'alerts') {
+    const found = evaluateAlerts(
+      plantId,
+      () => limsFreshness(),
+      (plant, days, limit) => outOfSpec(plant, days, limit),
+      (plant) => dataQuality(plant),
+      (filters) => balances(filters),
+    )
+    const result = runAlerts(found, !dryRun)
+    if (!dryRun) recordJobRun('alerts', { alerts_new: result.new.length })
+    return result
+  }
+  if (job === 'recurring') {
+    // Standing orders are configured on the server; the sandbox has none.
+    if (!dryRun) recordJobRun('recurring', { orders_created: 0 })
+    return { due: [], created: [], dry_run: dryRun }
+  }
+  if (job === 'lims-sync') {
+    // Same rule as the server's stub adapter: fill gaps only.
+    const known = new Set(store.lims_result.map((row) => row.sample_code))
+    const gaps = store.qc
+      .filter((record) => record.active && String(record.sample_number || '').trim()
+        && !known.has(record.sample_number))
+      .slice(0, 50)
+    const rows: Row[] = []
+    for (const gap of gaps) {
+      for (const [field, test, component] of [
+        ['moisture', 'MOISTURE', '%MOIST'],
+        ['ffa', 'FFA (NIR)', 'R-FFA'],
+        ['tfa', 'TFA (NIR)', '%TFA 1'],
+        ['ph', 'PH', 'PH'],
+      ] as [string, string, string][]) {
+        if (gap[field] === null || gap[field] === undefined) continue
+        rows.push({
+          sample_code: gap.sample_number, test_code: test, component,
+          value: Math.round(Number(gap[field]) * (0.985 + Math.random() * 0.03) * 100) / 100,
+          sampled_at: gap.test_date,
+        })
+      }
+    }
+    if (dryRun) return { adapter: 'sandbox', fetched: rows.length, written: 0, dry_run: true }
+    const retrieved = nowIso()
+    for (const row of rows) {
+      store.lims_result.push({
+        lims_result_id: nextId('lims_result', 'lims_result_id'),
+        sample_code: row.sample_code, test_code: row.test_code, component: row.component,
+        value_text: String(row.value), value_num: row.value,
+        include_in_report: 1, current_version: 1, sampled_at: row.sampled_at,
+        source: 'XLIMSFEEDGROUP', retrieved_at: retrieved,
+      })
+    }
+    recordJobRun('lims_sync', { adapter: 'sandbox', fetched: rows.length, written: rows.length })
+    return { adapter: 'sandbox', fetched: rows.length, written: rows.length, freshness: limsFreshness() }
+  }
+  if (job === 'gp-sync') {
+    const counts = { customers: { created: 0, updated: 0, unchanged: 1 }, vendors: { created: 0, updated: 0, unchanged: 1 }, orders: { created: 0, unchanged: 0, skipped: 0 } }
+    if (dryRun) return { adapter: 'sandbox', dry_run: true, would_read: { customers: 1, vendors: 1, orders: 0 } }
+    recordJobRun('gp_sync', counts)
+    return { adapter: 'sandbox', counts }
+  }
+  if (job === 'daily') {
+    const alertsResult = runJob('alerts', dryRun, plantId)
+    const closeResult = runJob('auto-close', dryRun, plantId)
+    if (!dryRun) recordJobRun('daily', {
+      orders_closed: closeResult.closed?.length ?? 0,
+      alerts_new: alertsResult.new?.length ?? 0,
+    })
+    return { alerts: alertsResult, auto_close: closeResult, recurring: { created: [] } }
+  }
+  return invalid(`Unknown job ${job}.`, { job: 'Not a job the sandbox runs.' })
+}
+
 /* ---------------------------------------------------------------- router */
 
 const startedAt = nowIso()
@@ -1856,10 +1970,128 @@ async function route(method: string, path: string, body: Row): Promise<any> {
       user: publicUser(user),
     }
   }
+  if (method === 'POST' && match(path, '/api/auth/pin')) {
+    // The sandbox accepts the seeded PINs (and any 4+ digits) so the kiosk
+    // flow can be walked through; the server checks a PBKDF2 hash.
+    const user = store.app_user.find((u) => u.username === String(body.username || '').trim())
+    if (!user) return fail(401, 'unauthenticated', 'That PIN was not recognised.')
+    if (String(body.pin || '').length < 4) {
+      return fail(401, 'unauthenticated', 'That PIN was not recognised.')
+    }
+    session = user
+    audit('login.pin', 'user', user.user_id, `${user.username} signed in at a kiosk`)
+    return {
+      token: `sandbox-${user.user_id}`,
+      expires_at: new Date(Date.now() + 30 * 60_000).toISOString(),
+      session_minutes: 30,
+      user: publicUser(user),
+    }
+  }
+  if (method === 'GET' && match(path, '/api/kiosk/plants')) {
+    return store.plant.filter((plant) => plant.active)
+  }
+  if (method === 'GET' && match(path, '/api/auth/kiosk-users')) {
+    const plant = Number(params.plant_id ?? 1)
+    return store.user_plant_access
+      .filter((access) => access.plant_id === plant)
+      .map((access) => byId.user().get(access.user_id))
+      .filter((user): user is Row => Boolean(user))
+      .map((user) => ({
+        user_id: user.user_id, username: user.username, full_name: user.full_name, role: user.role,
+      }))
+      .sort((a, b) => String(a.full_name).localeCompare(String(b.full_name)))
+  }
   if (method === 'POST' && match(path, '/api/auth/logout')) { session = null; return { ok: true } }
   if (method === 'GET' && match(path, '/api/auth/me')) return publicUser(requireUser())
 
   requireUser()
+
+  // ------------------------------------------------- prefill, numbering, scan
+  if ((m = match(path, '/api/prefill/qc/:id')) && method === 'GET') {
+    return prefillQc(Number(m[0]), (orderId, values) => validateQc(orderId, values))
+  }
+  if ((m = match(path, '/api/prefill/:operation')) && method === 'GET') {
+    return prefillOperation(
+      m[0],
+      {
+        order_id: params.order_id ? Number(params.order_id) : null,
+        plant_id: plantId,
+        trailer_number: params.trailer_number ?? null,
+      },
+      (filters) => balances(filters),
+      (orderId) => hydrateOrder(byId.order().get(orderId)!),
+    )
+  }
+  if ((m = match(path, '/api/trailers/:trailer/history')) && method === 'GET') {
+    return {
+      trailer_number: m[0],
+      last_material_hauled: trailerHistory(m[0], 1)[0]
+        ? `${trailerHistory(m[0], 1)[0].material_number} ${trailerHistory(m[0], 1)[0].material_description}`
+        : '',
+      history: trailerHistory(m[0]),
+    }
+  }
+  if (method === 'POST' && match(path, '/api/numbering/sample')) {
+    const orderId = Number(body.order_id)
+    const sample = nextSampleNumber(orderId)
+    audit('numbering.sample', 'order', orderId, `Generated sample number ${sample}`)
+    return { order_id: orderId, sample_number: sample }
+  }
+  if (method === 'GET' && match(path, '/api/scan')) {
+    return resolveScan(String(params.code ?? ''), plantId)
+  }
+
+  // ------------------------------------------------------------------ scale
+  if (method === 'POST' && match(path, '/api/scale/readings')) {
+    requirePermission(requireUser(), 'txn.post')
+    return recordScaleReading(body)
+  }
+  if (method === 'GET' && match(path, '/api/scale/latest')) {
+    const plant = Number(params.plant_id ?? plantId ?? 1)
+    let reading = latestScaleReading(plant, params.trailer_number ?? null)
+    // No agent runs in the sandbox, so mint one weigh-out to make the flow real.
+    if (!reading) reading = simulateScaleReading(plant, params.trailer_number ?? '')
+    return { reading, recent: store.scale_reading.slice(-10).reverse() }
+  }
+
+  // ----------------------------------------------------------------- alerts
+  if (method === 'GET' && match(path, '/api/alerts')) {
+    return {
+      alerts: store.alert_log.slice(-Number(params.limit ?? 50)).reverse(),
+      settings: alertSettings(),
+    }
+  }
+  if (method === 'POST' && match(path, '/api/alerts/run')) {
+    requirePermission(requireUser(), 'support.read')
+    const found = evaluateAlerts(
+      body.plant_id ?? null,
+      () => limsFreshness(),
+      (plant, days, limit) => outOfSpec(plant, days, limit),
+      (plant) => dataQuality(plant),
+      (filters) => balances(filters),
+    )
+    const result = runAlerts(found, Boolean(body.send))
+    if (body.send) recordJobRun('alerts', { alerts_new: result.new.length })
+    return result
+  }
+  if ((m = match(path, '/api/alerts/:id/acknowledge')) && method === 'POST') {
+    requirePermission(requireUser(), 'support.read')
+    const alert = store.alert_log.find((row) => row.alert_id === Number(m![0]))
+    if (!alert) return notFound(`Alert ${m[0]} was not found.`)
+    alert.acknowledged_at = nowIso()
+    alert.acknowledged_by = session?.username ?? 'sandbox'
+    return alert
+  }
+
+  // ------------------------------------------------------------------- jobs
+  if (method === 'GET' && match(path, '/api/jobs')) {
+    requirePermission(requireUser(), 'support.read')
+    return { jobs: jobHealth(), recent: store.job_run.slice(-20).reverse() }
+  }
+  if ((m = match(path, '/api/jobs/:job/run')) && method === 'POST') {
+    requirePermission(requireUser(), 'support.read')
+    return runJob(m[0], Boolean(body.dry_run), body.plant_id ?? null)
+  }
 
   // reference
   if (method === 'GET' && match(path, '/api/reference')) return referenceBundle(plantId)

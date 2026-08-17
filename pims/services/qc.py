@@ -27,6 +27,7 @@ from ..config import ANALYTE_LABELS
 from ..errors import BusinessRuleError, NotFound, ValidationError
 from ..security import require_permission
 from ..util import to_float, utc_now_iso
+from . import numbering
 from . import specs as specs_service
 
 QC_SELECT = """
@@ -240,6 +241,12 @@ def save(
 
     check = validate(order_id, payload, conn)
 
+    sample_number = (payload.get("sample_number") or "").strip()
+    if not sample_number and not qc_id:
+        auto = numbering.setting("sample.auto_generate", conn) == "true"
+        if auto or payload.get("generate_sample_number"):
+            sample_number = numbering.next_sample_number(order_id, conn=conn)
+
     values = {
         "bol_number": payload.get("bol_number") or "",
         "test_date": str(payload.get("test_date") or utc_now_iso())[:10],
@@ -254,7 +261,7 @@ def save(
         "steam_on": 1 if payload.get("steam_on") else 0,
         "seal_number": payload.get("seal_number") or "",
         "last_material_hauled": payload.get("last_material_hauled") or "",
-        "sample_number": (payload.get("sample_number") or "").strip(),
+        "sample_number": sample_number,
         "blend_serial_number": payload.get("blend_serial_number")
         or order["blend_serial_number"],
         "comments": payload.get("comments") or "",

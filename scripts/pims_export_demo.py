@@ -36,6 +36,7 @@ TABLES = [
     "material_spec",
     "location_type",
     "location",
+    "location_default",
     "customer",
     "vendor",
     "partner_requirement",

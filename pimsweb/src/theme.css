@@ -413,3 +413,122 @@ td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
   border: 1px solid var(--border); border-radius: var(--radius-sm);
   padding: 10px 12px; white-space: pre-wrap; overflow-x: auto; color: var(--text-2);
 }
+
+/* ------------------------------------------------------------ scan box */
+
+.scan {
+  position: relative;
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surface-3);
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  padding: 3px 10px;
+  min-width: 220px;
+}
+.scan input {
+  border: none; background: transparent; padding: 3px 0;
+  font-size: 13px; width: 100%;
+}
+.scan input:focus { outline: none; }
+.scan .hintkey {
+  font-size: 10.5px; color: var(--text-3); border: 1px solid var(--border);
+  border-radius: 4px; padding: 0 4px; background: var(--surface);
+}
+.scan-results {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 60;
+  width: min(460px, 90vw);
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.scan-results button {
+  display: block; width: 100%; text-align: left; border: none; border-radius: 0;
+  background: none; padding: 9px 12px; border-bottom: 1px solid var(--border);
+}
+.scan-results button:last-child { border-bottom: none; }
+.scan-results .kind {
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+.scan-results .empty { padding: 14px; }
+
+/* ---------------------------------------------------------- steppers */
+
+.steps { display: flex; gap: 6px; margin-bottom: 18px; flex-wrap: wrap; }
+.steps .step {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; border-radius: 999px;
+  background: var(--surface); border: 1px solid var(--border);
+  font-size: 13px; color: var(--text-2);
+}
+.steps .step .n {
+  width: 20px; height: 20px; border-radius: 50%;
+  display: grid; place-items: center; font-size: 11.5px; font-weight: 650;
+  background: var(--surface-3); color: var(--text-2);
+}
+.steps .step.active { border-color: var(--brand-2); color: var(--text); font-weight: 600; }
+.steps .step.active .n { background: var(--brand-2); color: #fff; }
+.steps .step.done { color: var(--ok); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.steps .step.done .n { background: var(--ok); color: #fff; }
+
+.step-actions {
+  display: flex; gap: 8px; justify-content: space-between;
+  margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--border);
+}
+
+/* suggestion chips: why a field was pre-filled */
+.why { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.why span {
+  font-size: 11.5px; color: var(--text-2);
+  background: var(--surface-3); border: 1px solid var(--border);
+  border-radius: 999px; padding: 2px 9px;
+}
+
+/* ------------------------------------------------------------- kiosk */
+
+body.kiosk { font-size: 16px; }
+body.kiosk .sidebar { display: none; }
+body.kiosk .app { grid-template-columns: 1fr; }
+body.kiosk .content { padding: 16px; }
+body.kiosk button, body.kiosk .btn { padding: 12px 18px; font-size: 16px; border-radius: 10px; }
+body.kiosk button.sm { padding: 8px 12px; font-size: 14px; }
+body.kiosk input, body.kiosk select, body.kiosk textarea { padding: 12px 12px; font-size: 17px; }
+body.kiosk .field > label { font-size: 14px; }
+body.kiosk table { font-size: 15px; }
+body.kiosk thead th { font-size: 12.5px; }
+body.kiosk tbody td { padding: 11px 12px; }
+body.kiosk .steps .step { padding: 11px 18px; font-size: 15px; }
+body.kiosk h1 { font-size: 24px; }
+
+.kiosk-bar {
+  display: flex; align-items: center; gap: 10px;
+  background: var(--surface); border-bottom: 1px solid var(--border);
+  padding: 10px 16px;
+}
+.kiosk-bar .who { font-weight: 600; }
+.kiosk-bar .timer { margin-left: auto; font-size: 13px; color: var(--text-2); }
+.kiosk-bar .timer.soon { color: var(--warn); font-weight: 650; }
+
+.pinpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; max-width: 300px; }
+.pinpad button {
+  font-size: 22px; padding: 16px 0; justify-content: center;
+  border-radius: 12px; font-variant-numeric: tabular-nums;
+}
+.pin-display {
+  font-size: 30px; letter-spacing: 12px; text-align: center;
+  padding: 12px 0; font-family: var(--mono); min-height: 58px;
+  color: var(--text);
+}
+.people { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.people button {
+  flex-direction: column; align-items: flex-start; gap: 2px;
+  padding: 14px 16px; border-radius: 12px; text-align: left;
+}
+.people .role { font-size: 12px; color: var(--text-2); text-transform: capitalize; }
+
+/* big numeric readouts for the plant floor */
+.readout {
+  font-variant-numeric: tabular-nums; font-weight: 650;
+  font-size: 34px; line-height: 1.1;
+}
+.readout .unit { font-size: 15px; font-weight: 500; color: var(--text-2); margin-left: 6px; }

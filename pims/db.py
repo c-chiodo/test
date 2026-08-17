@@ -152,12 +152,40 @@ def is_empty(conn: sqlite3.Connection | None = None) -> bool:
     return scalar("SELECT COUNT(*) FROM plant", (), conn) == 0
 
 
+#: Columns added after the first release. `CREATE TABLE IF NOT EXISTS` covers
+#: new tables; a column added to an existing table needs this. Each entry is
+#: (table, column, DDL) and is applied only when the column is absent.
+MIGRATIONS: list[tuple[str, str, str]] = [
+    ("app_user", "pin_hash", "ALTER TABLE app_user ADD COLUMN pin_hash TEXT NOT NULL DEFAULT ''"),
+]
+
+
+def columns(table: str, conn: sqlite3.Connection | None = None) -> set[str]:
+    conn = conn or get_connection()
+    return {row["name"] for row in conn.execute(f'PRAGMA table_info("{table}")')}
+
+
+def apply_migrations(conn: sqlite3.Connection | None = None) -> list[str]:
+    """Bring an existing database up to the current schema. Idempotent."""
+
+    conn = conn or get_connection()
+    applied: list[str] = []
+    existing = set(table_names(conn))
+    for table, column, ddl in MIGRATIONS:
+        if table not in existing or column in columns(table, conn):
+            continue
+        conn.execute(ddl)
+        applied.append(f"{table}.{column}")
+    return applied
+
+
 def init_db(settings: Settings | None = None, seed: bool | None = None) -> None:
     """Create the schema and, for an empty database, load the demo dataset."""
 
     settings = settings or get_settings()
     conn = get_connection()
     create_schema(conn)
+    apply_migrations(conn)
     should_seed = settings.auto_seed if seed is None else seed
     if should_seed and is_empty(conn):
         from . import seed as seed_module

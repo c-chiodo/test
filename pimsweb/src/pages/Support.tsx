@@ -6,6 +6,7 @@
  * one screen, readable by anyone with the supervisor role. */
 
 import { useState } from 'react'
+import { useToast } from '../App'
 import { api } from '../lib/api'
 import type { AuditEntry, DataQuality, Diagnostics } from '../lib/types'
 import {
@@ -28,12 +29,16 @@ export default function Support() {
         tabs={[
           { key: 'health', label: 'Health' },
           { key: 'quality', label: 'Data quality' },
+          { key: 'alerts', label: 'Alerts' },
+          { key: 'jobs', label: 'Scheduled jobs' },
           { key: 'audit', label: 'Audit trail' },
           { key: 'errors', label: 'Errors' },
         ]}
       />
       {tab === 'health' && <Health />}
       {tab === 'quality' && <Quality />}
+      {tab === 'alerts' && <Alerts />}
+      {tab === 'jobs' && <Jobs />}
       {tab === 'audit' && <Audit />}
       {tab === 'errors' && <Errors />}
     </>
@@ -191,6 +196,199 @@ function Quality() {
       </div>
     </>
   )
+}
+
+function Alerts() {
+  const toast = useToast()
+  const [busy, setBusy] = useState(false)
+  const alerts = useAsync(
+    () => api.get<{ alerts: any[]; settings: any }>('/api/alerts?limit=100'), [],
+  )
+
+  async function evaluateNow(send: boolean) {
+    setBusy(true)
+    try {
+      const result = await api.post<any>('/api/alerts/run', { send })
+      toast.push(
+        'info',
+        send ? `${result.new.length} alert(s) raised` : `${result.evaluated} condition(s) open`,
+        send
+          ? `${result.delivered} delivered, ${result.suppressed} already reported`
+          : 'Dry run — nothing recorded or sent.',
+      )
+      alerts.reload()
+    } catch (error) {
+      toast.push('error', 'Could not evaluate the rules', (error as Error).message)
+    } finally { setBusy(false) }
+  }
+
+  async function acknowledge(alertId: number) {
+    await api.post(`/api/alerts/${alertId}/acknowledge`, {})
+    alerts.reload()
+  }
+
+  if (alerts.loading) return <Loading />
+  if (alerts.error) return <ErrorBox error={alerts.error} />
+  const settings = alerts.data!.settings
+
+  return (
+    <>
+      <div style={{ marginBottom: 16 }}>
+        <Alert
+          tone={settings.webhook_configured ? 'ok' : 'warn'}
+          title={settings.webhook_configured
+            ? `Delivering ${settings.min_severity} and above to the configured webhook`
+            : 'No webhook configured — alerts are recorded but not delivered'}
+        >
+          The same condition is not re-sent inside {settings.repeat_hours} h. Set
+          <span className="mono"> alerts.webhook_url</span> to a Teams or Slack incoming webhook to
+          deliver them.
+          <button className="ghost sm" style={{ marginLeft: 8 }} disabled={busy} onClick={() => evaluateNow(false)}>
+            Evaluate now (dry run)
+          </button>
+          <button className="ghost sm" disabled={busy} onClick={() => evaluateNow(true)}>
+            Evaluate and send
+          </button>
+        </Alert>
+      </div>
+
+      <Card title="Recent alerts" subtitle="Newest first" tight>
+        <DataTable
+          rows={alerts.data!.alerts}
+          rowKey={(row) => row.alert_id}
+          maxHeight="60vh"
+          empty="Nothing raised yet."
+          columns={[
+            { key: 'created_at', label: 'When', render: (row) => fmtDateTime(row.created_at) },
+            {
+              key: 'severity',
+              label: 'Severity',
+              render: (row) => (
+                <Badge tone={row.severity === 'critical' ? 'danger' : row.severity === 'warning' ? 'warn' : undefined}>
+                  {row.severity}
+                </Badge>
+              ),
+            },
+            { key: 'rule', label: 'Rule' },
+            { key: 'subject', label: 'Subject' },
+            {
+              key: 'delivered',
+              label: 'Delivered',
+              render: (row) => row.delivered
+                ? <Badge tone="ok">sent</Badge>
+                : row.error
+                  ? <Badge tone="danger">{row.error.slice(0, 40)}</Badge>
+                  : <span className="muted small">recorded only</span>,
+            },
+            {
+              key: 'ack',
+              label: '',
+              render: (row) => row.acknowledged_at
+                ? <span className="small muted">ack {row.acknowledged_by}</span>
+                : <button className="sm" onClick={() => acknowledge(row.alert_id)}>Acknowledge</button>,
+            },
+          ]}
+        />
+      </Card>
+    </>
+  )
+}
+
+function Jobs() {
+  const toast = useToast()
+  const [busy, setBusy] = useState<string | null>(null)
+  const jobs = useAsync(() => api.get<{ jobs: Record<string, any>; recent: any[] }>('/api/jobs'), [])
+
+  const RUNNABLE = [
+    { key: 'daily', label: 'Daily run', blurb: 'standing orders, auto-close, alerts, digest' },
+    { key: 'alerts', label: 'Alerts', blurb: 'evaluate the rules' },
+    { key: 'auto-close', label: 'Auto-close', blurb: 'close fulfilled, shipped, QC-d orders' },
+    { key: 'recurring', label: 'Standing orders', blurb: 'create the orders due today' },
+    { key: 'lims-sync', label: 'LIMS sync', blurb: 'pull lab results into the projection' },
+    { key: 'gp-sync', label: 'GP sync', blurb: 'pull customers, vendors and order headers' },
+  ]
+
+  async function run(job: string, dryRun: boolean) {
+    setBusy(job)
+    try {
+      const result = await api.post<any>(`/api/jobs/${job}/run`, { dry_run: dryRun })
+      toast.push('success', `${job} ${dryRun ? 'dry run' : 'ran'}`, summarise(result))
+      jobs.reload()
+    } catch (error) {
+      toast.push('error', `${job} failed`, (error as Error).message)
+    } finally { setBusy(null) }
+  }
+
+  if (jobs.loading) return <Loading />
+  if (jobs.error) return <ErrorBox error={jobs.error} />
+
+  return (
+    <>
+      <Card title="Run a job now" subtitle="The same code cron calls — dry run first if you are unsure">
+        <div className="grid cols-3">
+          {RUNNABLE.map((job) => {
+            const status = jobs.data!.jobs[job.key.replace('-', '_')]
+            return (
+              <div key={job.key} className="card" style={{ boxShadow: 'none' }}>
+                <div className="body">
+                  <div className="row" style={{ justifyContent: 'space-between' }}>
+                    <strong>{job.label}</strong>
+                    {status && (
+                      <Badge tone={status.last_status === 'ok' ? 'ok' : 'danger'}>
+                        {status.hours_ago === null ? status.last_status : `${status.hours_ago} h ago`}
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="small muted" style={{ margin: '4px 0 10px' }}>{job.blurb}</div>
+                  <div className="row">
+                    <button className="sm" disabled={busy === job.key} onClick={() => run(job.key, true)}>
+                      Dry run
+                    </button>
+                    <button className="sm primary" disabled={busy === job.key} onClick={() => run(job.key, false)}>
+                      Run
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      </Card>
+
+      <Card title="Recent runs" tight>
+        <DataTable
+          rows={jobs.data!.recent}
+          rowKey={(row) => row.run_id}
+          empty="No scheduled work has run yet."
+          columns={[
+            { key: 'job', label: 'Job' },
+            { key: 'started_at', label: 'Started', render: (row) => fmtDateTime(row.started_at) },
+            {
+              key: 'status',
+              label: 'Status',
+              render: (row) => (
+                <Badge tone={row.status === 'ok' ? 'ok' : row.status === 'failed' ? 'danger' : 'warn'}>
+                  {row.status}
+                </Badge>
+              ),
+            },
+            { key: 'detail', label: 'Detail', render: (row) => <span className="small mono">{row.detail}</span> },
+            { key: 'error', label: 'Error' },
+          ]}
+        />
+      </Card>
+    </>
+  )
+}
+
+function summarise(result: any): string {
+  if (result?.created) return `${result.created.length} order(s) created`
+  if (result?.closed) return `${result.closed.length} order(s) closed`
+  if (result?.would_close) return `${result.would_close.length} order(s) would close`
+  if (result?.written !== undefined) return `${result.written} row(s) written`
+  if (result?.counts) return JSON.stringify(result.counts)
+  if (result?.new) return `${result.new.length} new, ${result.suppressed} suppressed`
+  return 'done'
 }
 
 function Audit() {

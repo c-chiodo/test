@@ -22,4 +22,4 @@ addopts = "-q"
 pims = ["schema.sql"]
 
 [tool.setuptools]
-packages = ["soyoil", "api", "pid", "pid.agents", "pims", "pims.services"]
+packages = ["soyoil", "api", "pid", "pid.agents", "pims", "pims.services", "pims.integrations"]

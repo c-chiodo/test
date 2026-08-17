@@ -210,6 +210,9 @@ def test_load_then_ship_clears_the_staged_trailer(conn, admin_user):
     )
     order_id = created[0]["order_id"]
 
+    # Relative to whatever is already staged: other tests load this dock too.
+    trailer_before = inventory.balance_of(trailer, material, conn)
+
     # Make sure the tank holds this product — the seeded contents vary.
     inventory.post(
         "RECEIVE",
@@ -244,7 +247,7 @@ def test_load_then_ship_clears_the_staged_trailer(conn, admin_user):
 
     inventory.ship(staged[0]["stage_id"], admin_user, conn)
     assert inventory.pending_shipments(order_id=order_id, conn=conn) == []
-    assert inventory.balance_of(trailer, material, conn) == pytest.approx(0)
+    assert inventory.balance_of(trailer, material, conn) == pytest.approx(trailer_before)
 
     progress = orders.get(order_id, conn)
     assert progress["percent_complete"] == pytest.approx(100.0)

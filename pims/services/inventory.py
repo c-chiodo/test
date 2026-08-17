@@ -19,6 +19,7 @@ from .. import audit, db
 from ..errors import BusinessRuleError, NotFound, ValidationError
 from ..security import require_permission, require_plant
 from ..util import round_lbs, to_float, today_iso, utc_now_iso
+from . import numbering
 
 #: Shape of each operation: which endpoints it uses and what it means.
 OPERATIONS: dict[str, dict[str, Any]] = {
@@ -249,10 +250,19 @@ def post(
                 )
             if loc["bol_required"] and key == "to_location_id" and not payload.get("to_bol"):
                 if operation in {"RECEIVE", "LOAD"}:
-                    raise ValidationError(
-                        f"{loc['number']} requires a BOL number.",
-                        fields={"to_bol": "Enter the BOL number."},
-                    )
+                    # The BOL series is ours, so mint one rather than making an
+                    # operator type it. Turn off with bol.auto_generate=false
+                    # and the old "enter the BOL number" rule comes back.
+                    if numbering.setting("bol.auto_generate", conn) != "false":
+                        payload = {
+                            **payload,
+                            "to_bol": numbering.next_bol(payload.get("trailer_number"), conn),
+                        }
+                    else:
+                        raise ValidationError(
+                            f"{loc['number']} requires a BOL number.",
+                            fields={"to_bol": "Enter the BOL number."},
+                        )
 
     # Stock check.
     if spec["needs_from"] and not allow_negative:
@@ -328,6 +338,10 @@ def post(
                 },
                 conn,
             )
+        if payload.get("scale_reading_id"):
+            from ..integrations import scale as scale_integration
+
+            scale_integration.consume(int(payload["scale_reading_id"]), txn_id, conn)
         if order_id and order and order["status_id"] == 1:
             db.update("order", {"order_id": order_id}, {"status_id": 2}, conn)
         audit.record(

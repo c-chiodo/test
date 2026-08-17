@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import os
 import secrets
 from datetime import timedelta
 from typing import Any
 
 from . import audit, db
 from .config import get_settings
-from .errors import AuthError, PermissionError_
+from .errors import AuthError, PermissionError_, ValidationError
 from .util import parse_dt, utc_now, utc_now_iso
 
 _PBKDF2_ROUNDS = 240_000
@@ -122,6 +123,75 @@ def login(username: str, password: str, conn=None) -> dict[str, Any]:
         conn=conn,
     )
     return {"token": token, "expires_at": expires.isoformat(), "user": public_user(user, conn)}
+
+
+def login_with_pin(username: str, pin: str, plant_id: int | None = None, conn=None) -> dict[str, Any]:
+    """Kiosk sign-in: a short PIN, a short session.
+
+    A shared loadout terminal cannot ask for a password every load and cannot
+    stay signed in as whoever used it last. The PIN identifies the operator for
+    the audit trail; the session is deliberately brief (``kiosk_session_minutes``)
+    so an unattended screen stops being someone else's account.
+    """
+
+    user = get_user(username, conn)
+    if user is None or not user.get("pin_hash") or not verify_password(pin, user["pin_hash"]):
+        raise AuthError("That PIN was not recognised.")
+    if plant_id is not None:
+        require_plant(user, plant_id, conn)
+
+    minutes = int(os.environ.get("PIMS_KIOSK_SESSION_MINUTES", "30"))
+    token = secrets.token_urlsafe(32)
+    expires = utc_now() + timedelta(minutes=minutes)
+    db.insert(
+        "user_session",
+        {
+            "token": token,
+            "user_id": user["user_id"],
+            "created_at": utc_now_iso(),
+            "expires_at": expires.replace(microsecond=0).isoformat(),
+        },
+        conn,
+    )
+    audit.record(
+        username=username,
+        action="login.pin",
+        entity="user",
+        entity_id=user["user_id"],
+        summary=f"{username} signed in at a kiosk",
+        detail={"plant_id": plant_id},
+        conn=conn,
+    )
+    return {
+        "token": token,
+        "expires_at": expires.isoformat(),
+        "session_minutes": minutes,
+        "user": public_user(user, conn),
+    }
+
+
+def kiosk_users(plant_id: int, conn=None) -> list[dict]:
+    """Who can sign in at this plant's terminal — the picker on the kiosk."""
+
+    return db.query(
+        """
+        SELECT u.user_id, u.username, u.full_name, u.role
+        FROM app_user u
+        JOIN user_plant_access a ON a.user_id = u.user_id
+        WHERE u.active = 1 AND a.plant_id = ? AND u.pin_hash <> ''
+        ORDER BY u.full_name
+        """,
+        (plant_id,),
+        conn,
+    )
+
+
+def set_pin(username: str, pin: str, conn=None) -> None:
+    if not pin.isdigit() or not 4 <= len(pin) <= 8:
+        raise ValidationError(
+            "A PIN is 4 to 8 digits.", fields={"pin": "Use 4 to 8 digits."}
+        )
+    db.update("app_user", {"username": username}, {"pin_hash": hash_password(pin)}, conn)
 
 
 def logout(token: str, conn=None) -> None:

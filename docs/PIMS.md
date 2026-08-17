@@ -63,6 +63,15 @@ pims/               Python application
     inquiry.py        the four inquiry tabs
     query.py          the custom query builder, parameterised
     reference.py      dropdown data
+    numbering.py      generated BOL and sample numbers
+    prefill.py        what each operator screen should already know
+    scan.py           resolve a scanned code to an order, sample, BOL, tank…
+    alerts.py         alert rules, dedupe and webhook delivery
+    jobs.py           auto-close, standing orders, the daily run
+  integrations/     the systems PIMS does not own
+    lims_ingest.py    LabWare results into the local projection
+    gp_sync.py        Great Plains customers, vendors, order headers
+    scale.py          truck-scale weights posted by a plant agent
   health.py         health checks, diagnostics, data-quality probes
   security.py       users, roles, plant access, sessions
   audit.py          the audit trail every write goes through
@@ -118,7 +127,31 @@ count toward the balance, so history reconciles instead of quietly changing.
 | Change Plant | Plant switcher in the top bar | |
 | "You are in the TEST environment" | Environment badge in the top bar | |
 | Customers / Materials / Requirements | **Products & limits**, requirements shown on the order | Master data still originates in Great Plains |
-| — | **Support console** | New: health, data quality, audit trail, recent failures |
+| — | **Load & ship** | New: load → QC → checklist → BOL in one flow, pre-filled |
+| — | Kiosk mode | New: PIN sign-in, touch layout and idle sign-out for a shared plant terminal |
+| — | Scan box | New: one box resolves an order, sample, BOL, tank, product or trailer |
+| — | **Support console** | New: health, data quality, alerts, scheduled jobs, audit trail, failures |
+
+## What the system does on its own
+
+Automation is deliberately the boring kind: it fills in what is already known,
+watches what nobody was watching, and never decides something a person should.
+
+- **Numbers are minted, not typed.** BOL numbers on every load and receipt;
+  sample numbers on request (see the caution in the runbook).
+- **Screens arrive pre-filled** — the tank holding the most of the product, the
+  plant's default receiving location, the outstanding quantity, the trailer and
+  what it last hauled — each with the reason shown beside it.
+- **Weights come from the scale** when an agent is running at the plant.
+- **Scanning replaces navigation**: one box, any barcode on the floor.
+- **Alerts** for a stale LIMS feed, out-of-spec results, trailers loaded and
+  not shipped, tanks over 95%, and product-setup gaps — deduplicated, delivered
+  to a webhook, and recorded either way.
+- **Scheduled jobs** close finished orders, raise standing orders, pull LIMS
+  results and GP master data, and mail a daily digest.
+
+Every one of these is a setting away from being turned off, and every job runs
+with `--dry-run` first. See [PIMS_RUNBOOK.md](PIMS_RUNBOOK.md) §12–16.
 
 ## What is not built
 

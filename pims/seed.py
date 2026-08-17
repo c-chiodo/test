@@ -293,10 +293,31 @@ DEMO_PASSWORD = "pims-demo"
 
 SYSTEM_SETTINGS = [
     ("bol.prefix", "001-", "Prefix applied to generated BOL numbers"),
+    ("bol.format", "{prefix}{sequence:06d}-1", "Template for generated BOL numbers"),
+    ("bol.append_trailer", "true", "Append (trailer) to the generated BOL, as the legacy numbers do"),
+    ("bol.auto_generate", "true", "Mint a BOL when a load or receipt needs one and none was entered"),
+    ("sample.format", "{plant}{party}D{date}Q{sequence:07d}", "Template for generated sample numbers"),
+    ("sample.date_format", "%y%m%d", "Date portion of a generated sample number"),
+    # Off by default: a code LabWare does not recognise trades a typo problem
+    # for a matching problem. Confirm the scheme with the lab, then enable.
+    ("sample.auto_generate", "false", "Fill the sample number automatically on new QC records"),
     ("shrinkage.warn_pct", "0.5", "Warn when shrinkage exceeds this % of the run"),
     ("qc.require_sample_number", "true", "Require a sample number on finished-product QC"),
     ("lims.refresh_cron", "0 */2 * * *", "Expected LIMS projection refresh cadence"),
+    ("alerts.webhook_url", "", "Incoming webhook (Teams/Slack) for alerts; blank = record only"),
+    ("alerts.min_severity", "warning", "Lowest severity delivered to the webhook"),
+    ("alerts.repeat_hours", "24", "Do not re-send the same finding inside this window"),
+    ("autoclose.enabled", "true", "Close orders once fulfilled, shipped and QC'd"),
+    ("autoclose.require_qc", "true", "Only auto-close when the order has a QC record"),
+    ("autoclose.min_percent", "99", "Percent complete an order must reach to auto-close"),
 ]
+
+#: Counters start above the numbers already in the legacy series so a generated
+#: number can never collide with a historical one.
+NUMBER_SEQUENCES = [("bol", 112_000), ("sample", 400_000)]
+
+#: Kiosk PINs for the shared plant terminal. Demo values.
+USER_PINS = {"cchiodo": "4021", "jmartin": "2210", "rprice": "3317", "toperator": "5588"}
 
 
 def seed_all(conn: sqlite3.Connection | None = None) -> None:
@@ -378,6 +399,8 @@ def _seed_reference(conn) -> None:
         db.insert(
             "system_setting", {"key": key, "value": value, "description": desc}, conn
         )
+    for key, start in NUMBER_SEQUENCES:
+        db.insert("number_sequence", {"key": key, "next_value": start}, conn)
 
 
 def _seed_materials(conn) -> dict[str, int]:
@@ -567,6 +590,7 @@ def _seed_users(conn) -> dict[str, int]:
                 "email": email,
                 "role": role,
                 "password_hash": pw,
+                "pin_hash": hash_password(USER_PINS.get(username, "0000")),
                 "date_added": utc_now_iso(),
             },
             conn,
