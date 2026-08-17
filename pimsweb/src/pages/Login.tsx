@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { api, token as tokenStore } from '../lib/api'
+import { DEMO, api, token as tokenStore } from '../lib/api'
 import type { User } from '../lib/types'
 import { ErrorBox, Field } from '../components/ui'
 
@@ -43,8 +43,9 @@ export default function Login({
             <li>Support console with health and audit</li>
           </ul>
           <p className="small" style={{ marginTop: 24, opacity: 0.7 }}>
-            Replaces the Windows client. Same workflows, browser-based, with the
-            business rules documented and tested.
+            {DEMO
+              ? 'Sandbox build: the seeded dataset and the rules run inside this page. Post movements, record QC, run queries — everything reacts. Nothing is saved; reload to start over.'
+              : 'Replaces the Windows client. Same workflows, browser-based, with the business rules documented and tested.'}
           </p>
         </div>
         <form onSubmit={submit}>
@@ -71,10 +72,12 @@ export default function Login({
             {busy ? 'Signing in…' : 'Sign in'}
           </button>
           <div className="small muted">
-            Demo build: <span className="mono">cchiodo</span> (admin),{' '}
-            <span className="mono">rprice</span> (QC),{' '}
+            Sign in as <span className="mono">cchiodo</span> (admin),{' '}
+            <span className="mono">jmartin</span> (supervisor),{' '}
+            <span className="mono">rprice</span> (QC) or{' '}
             <span className="mono">toperator</span> (operator) — password{' '}
-            <span className="mono">pims-demo</span>.
+            <span className="mono">pims-demo</span>
+            {DEMO ? ' (any password works in the sandbox).' : '.'}
           </div>
         </form>
       </div>

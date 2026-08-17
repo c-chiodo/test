@@ -98,6 +98,10 @@ python -m pims serve         # http://127.0.0.1:8080 (API docs at /docs)
 python -m pims diagnose      # every health check; exit 1 if any failed
 ```
 
+To look around without running anything, `cd pimsweb && npm run build:demo`
+builds a single self-contained HTML file that opens in a browser with the
+seeded data and the rules running in the page.
+
 The second half of the job is being able to support it: a health endpoint per
 dependency, a data-quality probe that lists the rows behind each finding, an
 audit trail with before/after values, and correlation ids that tie a user's

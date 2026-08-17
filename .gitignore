@@ -15,3 +15,5 @@ data/pims.db
 data/pims.db-wal
 data/pims.db-shm
 pimsweb/tsconfig.tsbuildinfo
+# The sandbox bundle is a build artifact of `npm run build:demo`.
+pimsweb/dist-demo/

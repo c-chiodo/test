@@ -33,6 +33,27 @@ export class ApiError extends Error {
   }
 }
 
+/* The sandbox build has no server: `src/demo/api.ts` answers the same routes
+ * in the page. Vite drops that module from the normal build. */
+export const DEMO = import.meta.env.VITE_PIMS_DEMO === '1'
+
+type DemoHandler = (method: string, path: string, body?: unknown) => Promise<any>
+let demoHandler: DemoHandler | null = null
+
+async function demo(): Promise<DemoHandler> {
+  if (!demoHandler) {
+    const module = await import('../demo/api')
+    demoHandler = module.handle as DemoHandler
+  }
+  return demoHandler
+}
+
+/** Notices the sandbox needs to show the user (downloads are blocked there). */
+let noticeSink: ((title: string, body?: string) => void) | null = null
+export function setNoticeSink(sink: (title: string, body?: string) => void): void {
+  noticeSink = sink
+}
+
 const TOKEN_KEY = 'pims.token'
 
 export const token = {
@@ -42,6 +63,15 @@ export const token = {
 }
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  if (DEMO) {
+    const handle = await demo()
+    try {
+      return (await handle(method, path, (body ?? {}) as Record<string, unknown>)) as T
+    } catch (error: any) {
+      throw new ApiError(error?.status ?? 500, error as ApiErrorBody)
+    }
+  }
+
   const headers: Record<string, string> = { Accept: 'application/json' }
   const current = token.get()
   if (current) headers.Authorization = `Bearer ${current}`
@@ -81,6 +111,27 @@ export const api = {
 
   /** POST returning a file the browser should download. */
   async download(path: string, body: unknown, filename: string): Promise<void> {
+    if (DEMO) {
+      // The sandbox runs inside an iframe that blocks page-initiated
+      // downloads, so hand the export over through the clipboard instead of
+      // firing a link that would silently do nothing.
+      const handle = await demo()
+      const csv = (await handle('POST', path, body as Record<string, unknown>)) as string
+      try {
+        await navigator.clipboard.writeText(csv)
+        noticeSink?.(
+          'CSV copied to your clipboard',
+          `${csv.trim().split('\n').length - 1} row(s). File downloads are blocked in the sandbox; paste it into a spreadsheet.`,
+        )
+      } catch {
+        noticeSink?.(
+          'Export ready, but the clipboard is blocked',
+          'Downloads and clipboard access are both restricted in the sandbox — run PIMS locally to export files.',
+        )
+      }
+      return
+    }
+
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     const current = token.get()
     if (current) headers.Authorization = `Bearer ${current}`

@@ -6,7 +6,7 @@
  * bar, where they stay visible on every screen. */
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
-import { ApiError, api, token as tokenStore } from './lib/api'
+import { ApiError, DEMO, api, setNoticeSink, token as tokenStore } from './lib/api'
 import type { Reference, User } from './lib/types'
 import { ErrorBox, Loading, ToastProvider, useToast } from './components/ui'
 import Login from './pages/Login'
@@ -86,7 +86,16 @@ export default function App() {
   )
 }
 
+/** Lets the API layer surface sandbox-only notices as toasts. */
+function useNoticeSink(): void {
+  const toast = useToast()
+  useEffect(() => {
+    setNoticeSink((title, body) => toast.push('info', title, body))
+  }, [toast])
+}
+
 function Session() {
+  useNoticeSink()
   const [user, setUser] = useState<User | null>(null)
   const [checking, setChecking] = useState(true)
   const [error, setError] = useState<unknown>(null)
@@ -217,6 +226,11 @@ function Shell({ user, onSignOut }: { user: User; onSignOut: () => void }) {
           <span className="small muted nowrap">
             {user.full_name} · {user.role}
           </span>
+          {DEMO && (
+            <span className="small muted nowrap" title="Changes live in this browser tab only; reload to reset.">
+              in-browser demo
+            </span>
+          )}
           <button className="ghost sm" onClick={logout}>Sign out</button>
         </header>
 

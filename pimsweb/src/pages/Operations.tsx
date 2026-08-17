@@ -312,12 +312,20 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
         <div className="stack">
           {spec.from && (
             <Card title="Balance at the from location" tight>
-              <BalancePanel rows={fromBalances} loading={balances.loading} />
+              <BalancePanel
+                rows={fromBalances}
+                loading={balances.loading}
+                selected={Boolean(form.from_location_id)}
+              />
             </Card>
           )}
           {spec.to && (
             <Card title="Balance at the to location" tight>
-              <BalancePanel rows={toBalances} loading={balances.loading} />
+              <BalancePanel
+                rows={toBalances}
+                loading={balances.loading}
+                selected={Boolean(form.to_location_id)}
+              />
             </Card>
           )}
           {order && (
@@ -339,13 +347,17 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
   )
 }
 
-function BalancePanel({ rows, loading }: { rows: Balance[]; loading: boolean }) {
+function BalancePanel({
+  rows, loading, selected,
+}: { rows: Balance[]; loading: boolean; selected: boolean }) {
   if (loading) return <Loading />
   return (
     <DataTable
       rows={rows}
       rowKey={(row) => `${row.location_id}-${row.material_id}`}
-      empty="Select a location to see what it holds."
+      empty={selected
+        ? 'This location is empty — nothing on hand.'
+        : 'Select a location to see what it holds.'}
       maxHeight="240px"
       columns={[
         { key: 'material_number', label: 'Material' },

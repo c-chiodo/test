@@ -160,6 +160,22 @@ working system at <http://127.0.0.1:8080> with API docs at `/docs`.
 Demo sign-ins (seeded, demo build only): `cchiodo` (admin), `jmartin`
 (supervisor), `rprice` (QC), `toperator` (operator) — password `pims-demo`.
 
+### The browser sandbox
+
+For looking around without running anything, `npm run build:demo` produces a
+single self-contained HTML file (`pimsweb/dist-demo/pims-sandbox.html`) that
+opens in any browser with no server. The seeded dataset is baked in and the
+rules run in the page (`pimsweb/src/demo/`): movements are refused when a tank
+cannot cover them, QC validation still asks the material what it is tested for,
+voids still write reversing entries, and the support console reports on the
+sandbox's own state. Edits live in the tab and a reload resets it.
+
+Two caveats: it is a re-implementation for exploration, so the server in `pims/`
+is the one that is tested and the one that would run in a plant; and file
+downloads are blocked inside the sandbox, so CSV exports copy to the clipboard
+instead. Regenerate the dataset after changing the seed with
+`python scripts/pims_export_demo.py`.
+
 ## Roles
 
 | Role | Can |
