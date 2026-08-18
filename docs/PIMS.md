@@ -156,7 +156,9 @@ watches what nobody was watching, and never decides something a person should.
 - **Screens arrive pre-filled** — the tank holding the most of the product, the
   plant's default receiving location, the outstanding quantity, the trailer and
   what it last hauled — each with the reason shown beside it.
-- **Weights come from the scale** when an agent is running at the plant.
+- **Weights come from the scale** when an agent is running at the plant —
+  straight into the quantity box, unless the operator has typed one or the
+  chosen tank cannot cover it.
 - **Scanning replaces navigation**: one box, any barcode on the floor.
 - **Alerts** for a stale LIMS feed, out-of-spec results, trailers loaded and
   not shipped, tanks over 95%, and product-setup gaps — deduplicated, delivered

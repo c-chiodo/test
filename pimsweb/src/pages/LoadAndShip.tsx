@@ -253,12 +253,36 @@ export default function LoadAndShip({ initialOrderId }: { initialOrderId?: numbe
 
 function PickOrder({ onPicked }: { onPicked: (orderId: number) => void }) {
   const { plantId } = useApp()
+  const [scanCode, setScanCode] = useState('')
+  const [scanMessage, setScanMessage] = useState('')
   const result = useAsync(
     () => api.get<{ rows: Order[] }>(
       `/api/orders${qs({ plant_id: plantId, order_type_id: 1, open_only: true, limit: 100 })}`,
     ),
     [plantId],
   )
+
+  // The fastest way to start is the paperwork in the operator's hand: scan
+  // the order, the BOL or the trailer and the flow opens on it. The field is
+  // focused on arrival, so a scanner works with no clicks at all — picking
+  // from the list is the fallback, not the front door.
+  async function scan(event: React.FormEvent) {
+    event.preventDefault()
+    const code = scanCode.trim()
+    if (!code) return
+    setScanMessage('')
+    try {
+      const found = await api.get<{ hits: any[] }>(`/api/scan${qs({ code, plant_id: plantId })}`)
+      const hit = found.hits.find((h) => h.type === 'order' || h.order_id)
+      if (hit) {
+        onPicked(Number(hit.type === 'order' ? hit.id : hit.order_id))
+        return
+      }
+      setScanMessage(`Nothing loadable matches "${code}". Pick the order from the list instead.`)
+    } catch (error) {
+      setScanMessage((error as Error).message)
+    }
+  }
 
   // Orders with product still to load come first. An order that is already
   // loaded to its full quantity is not work, and burying the real jobs under
@@ -279,6 +303,19 @@ function PickOrder({ onPicked }: { onPicked: (orderId: number) => void }) {
       }
       tight
     >
+      <form className="scan-start" onSubmit={scan}>
+        <label htmlFor="load-scan">Scan the paperwork</label>
+        <input
+          id="load-scan"
+          autoFocus
+          placeholder="Order, BOL or trailer number"
+          value={scanCode}
+          onChange={(event) => { setScanCode(event.target.value); setScanMessage('') }}
+        />
+        <button type="submit" className="primary">Go</button>
+        <span className="muted small">or pick from the list below</span>
+      </form>
+      {scanMessage && <div className="notice" role="status">{scanMessage}</div>}
       {result.loading ? <Loading /> : result.error ? <ErrorBox error={result.error} /> : (
         <DataTable
           rows={rows}
@@ -372,6 +409,22 @@ function LoadStep({
     return () => { cancelled = true }
   }, [plantId, form.trailer_number, posted?.transaction_id])
 
+  // And put it straight in the box. Copying a number off one screen into
+  // another is the slowest and least reliable step on the dock. Precedence:
+  // a weight the scale measured beats the quantity the prefill suggested,
+  // because one is a measurement and the other is a wish — but it never
+  // overwrites a number the operator typed, and it never fills a weight the
+  // chosen tank cannot cover. A measured weight is not to be trimmed to fit;
+  // if it does not fit, that is a question for a person, so the box is left
+  // alone and the scale card offers the weight instead.
+  const qtyTouched = useRef(false)
+  useEffect(() => {
+    const net = reading?.net_lbs ?? reading?.gross_lbs
+    if (!net || qtyTouched.current) return
+    if (net > available) return
+    setForm((current) => (current.from_qty === net ? current : { ...current, from_qty: net }))
+  }, [reading, available])
+
   const set = (patch: Record<string, any>) => setForm((current) => ({ ...current, ...patch }))
   const locations = reference.locations.filter((location) => location.plant_id === plantId)
 
@@ -446,7 +499,7 @@ function LoadStep({
           <Field label="Trailer #" error={error?.fields?.trailer_number}>
             <input value={form.trailer_number ?? ''} onChange={(e) => set({ trailer_number: e.target.value })} />
           </Field>
-          <Field label="Transaction date">
+          <Field label="Date">
             <input type="date" value={form.user_date ?? today()} onChange={(e) => set({ user_date: e.target.value })} />
           </Field>
           <Field
@@ -463,7 +516,7 @@ function LoadStep({
               type="number"
               inputMode="decimal"
               value={form.from_qty ?? ''}
-              onChange={(e) => set({ from_qty: e.target.value })}
+              onChange={(e) => { qtyTouched.current = true; set({ from_qty: e.target.value }) }}
             />
           </Field>
         </div>
@@ -523,7 +576,7 @@ function LoadStep({
             onClick={() => post()}
             disabled={busy || overdrawn || !form.from_qty}
           >
-            {busy ? <span className="spinner" /> : null} Post load
+            {busy ? <span className="spinner" /> : null} Save load
           </button>
         </div>
       </Card>
@@ -543,12 +596,16 @@ function LoadStep({
                 </div>
               </div>
               <div className="row">
-                <button
-                  className="primary"
-                  onClick={() => set({ from_qty: reading.net_lbs ?? reading.gross_lbs })}
-                >
-                  Use this weight
-                </button>
+                {Number(form.from_qty) === (reading.net_lbs ?? reading.gross_lbs) ? (
+                  <Badge tone="ok">In the quantity box</Badge>
+                ) : (
+                  <button
+                    className="primary"
+                    onClick={() => set({ from_qty: reading.net_lbs ?? reading.gross_lbs })}
+                  >
+                    Use this weight
+                  </button>
+                )}
               </div>
             </div>
           ) : (

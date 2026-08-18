@@ -423,10 +423,31 @@ export function consumeScaleReading(readingId: number, transactionId: number): v
   if (row) row.consumed_by = transactionId
 }
 
-/** The sandbox has no plant agent, so it can mint a plausible weigh-out. */
+/** The sandbox has no plant agent, so it can mint a plausible weigh-out.
+ *
+ * "Plausible" includes physics: a truck cannot weigh more than the plant's
+ * tanks could have given it, so the simulated net stays under the largest
+ * single-product balance at the plant. Without the cap the random weight
+ * routinely tripped the over-draw guard, which reads as a broken app rather
+ * than a careful one. */
 export function simulateScaleReading(plantId: number, trailerNumber?: string): Row {
+  const balances: Map<string, number> = new Map()
+  const locPlant = new Map(store.location.map((l) => [l.location_id, l.plant_id]))
+  for (const t of store.inventory_transaction) {
+    if (t.to_location_id && locPlant.get(t.to_location_id) === plantId) {
+      const k = `${t.to_location_id}:${t.to_material_id}`
+      balances.set(k, (balances.get(k) ?? 0) + t.to_qty)
+    }
+    if (t.from_location_id && locPlant.get(t.from_location_id) === plantId) {
+      const k = `${t.from_location_id}:${t.from_material_id}`
+      balances.set(k, (balances.get(k) ?? 0) - t.from_qty)
+    }
+  }
+  const biggest = Math.max(4_500, ...[...balances.values()])
+  const ceiling = Math.min(biggest * 0.85, 46_000)
   const tare = 14_000 + Math.round(Math.random() * 2_400 / 20) * 20
-  const gross = tare + 20_000 + Math.round(Math.random() * 26_000 / 20) * 20
+  const net = Math.max(4_500, Math.round((ceiling * (0.5 + Math.random() * 0.5)) / 20) * 20)
+  const gross = tare + net
   return recordScaleReading({
     plant_id: plantId,
     trailer_number: trailerNumber ?? '',

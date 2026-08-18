@@ -629,3 +629,15 @@ body.kiosk .pinpad button { min-height: 68px; }
   body { background: #fff; color: #000; font-size: 12pt; }
   a[href]::after { content: ""; }
 }
+
+/* The front door of Load & ship: scan the paperwork, start the flow. */
+.scan-start {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 12px; margin-bottom: 12px;
+  background: var(--brand-soft); border: 1px solid color-mix(in srgb, var(--brand-2) 30%, transparent);
+  border-radius: var(--radius);
+}
+.scan-start label { font-weight: 600; }
+.scan-start input { flex: 1 1 220px; min-width: 180px; font-size: 16px; }
+body.kiosk .scan-start input { font-size: 19px; }
+body.kiosk .scan-start label { font-size: 17px; }

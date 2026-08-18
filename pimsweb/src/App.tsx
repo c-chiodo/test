@@ -152,7 +152,18 @@ function Session() {
   if (checking) return <div className="login"><Loading label="Signing in…" /></div>
   if (!user) {
     return kiosk
-      ? <Kiosk onSignedIn={setUser} signedOutReason={signedOutReason} />
+      ? (
+        <Kiosk
+          signedOutReason={signedOutReason}
+          onSignedIn={(next) => {
+            // Every kiosk sign-in starts at Load & ship, not wherever the last
+            // person left the terminal. If a load is mid-flight, that is the
+            // screen the resume offer lives on anyway.
+            window.location.hash = '#/load-ship'
+            setUser(next)
+          }}
+        />
+      )
       : <Login onSignedIn={setUser} error={error} />
   }
   return (

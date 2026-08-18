@@ -239,7 +239,7 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
               </Field>
             )}
 
-            <Field label="Transaction date">
+            <Field label="Date">
               <input type="date" value={form.user_date} onChange={(event) => set({ user_date: event.target.value })} />
             </Field>
             {spec.trailer && (
@@ -422,7 +422,7 @@ function TransactionForm({ spec }: { spec: OperationSpec }) {
               <button onClick={() => navigate(`orders/${posted.order_id}`)}>Open order {posted.order_id}</button>
             )}
             <button className="primary" onClick={() => post()} disabled={busy}>
-              {busy ? <span className="spinner" /> : null} Post {spec.label.toLowerCase()}
+              {busy ? <span className="spinner" /> : null} Save {spec.label.toLowerCase()}
             </button>
           </div>
         </Card>
