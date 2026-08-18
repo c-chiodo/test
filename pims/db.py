@@ -197,6 +197,11 @@ MIGRATIONS: list[tuple[str, str, str]] = [
         "stage",
         "ALTER TABLE qa_header ADD COLUMN stage TEXT NOT NULL DEFAULT 'post_load'",
     ),
+    (
+        "inventory_transaction",
+        "batch_id",
+        "ALTER TABLE inventory_transaction ADD COLUMN batch_id TEXT",
+    ),
 ]
 
 #: Indexes that must exist alongside the migrated columns. ``CREATE INDEX IF
@@ -204,6 +209,7 @@ MIGRATIONS: list[tuple[str, str, str]] = [
 MIGRATION_INDEXES: list[str] = [
     "CREATE UNIQUE INDEX IF NOT EXISTS ux_txn_idempotency"
     " ON inventory_transaction (idempotency_key) WHERE idempotency_key IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_txn_batch ON inventory_transaction (batch_id)",
     "CREATE INDEX IF NOT EXISTS ix_audit_order ON audit_log (order_id)",
 ]
 

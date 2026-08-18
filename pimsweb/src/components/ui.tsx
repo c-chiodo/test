@@ -359,7 +359,7 @@ export function ErrorBox({ error }: { error: unknown }) {
 }
 
 /** Data loader with loading / error states, refreshable by the caller. */
-export function useAsync<T>(loader: () => Promise<T>, deps: unknown[]) {
+export function useAsync<T>(loader: () => Promise<T>, deps: unknown[], debounceMs = 0) {
   const [state, setState] = useState<{ data: T | null; loading: boolean; error: unknown }>({
     data: null, loading: true, error: null,
   })
@@ -368,10 +368,13 @@ export function useAsync<T>(loader: () => Promise<T>, deps: unknown[]) {
   useEffect(() => {
     let cancelled = false
     setState((current) => ({ ...current, loading: true, error: null }))
-    loader()
+    const run = () => loader()
       .then((data) => { if (!cancelled) setState({ data, loading: false, error: null }) })
       .catch((error) => { if (!cancelled) setState({ data: null, loading: false, error }) })
-    return () => { cancelled = true }
+    // A debounce, for loaders keyed to something the user is still typing —
+    // the previous data stays on screen while the next request waits.
+    const handle = debounceMs ? window.setTimeout(run, debounceMs) : (run(), 0)
+    return () => { cancelled = true; if (debounceMs) window.clearTimeout(handle) }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [...deps, nonce])
 

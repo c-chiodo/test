@@ -1329,6 +1329,242 @@ function saveQaChecklist(orderId: number, payload: Row, stage?: string | null): 
   return qaChecklists(orderId)[0]
 }
 
+/* -------------------------------------------------------------- blending */
+
+function recipeComponents(recipeId: number): Row[] {
+  const materials = byId.material()
+  return store.blend_recipe_component
+    .filter((c) => c.recipe_id === recipeId)
+    .sort((a, b) => a.sort_order - b.sort_order || a.component_id - b.component_id)
+    .map((c) => ({
+      ...c,
+      material_number: materials.get(c.material_id)?.number ?? null,
+      material_description: materials.get(c.material_id)?.description ?? null,
+    }))
+}
+
+function recipeForMaterial(materialId: number): Row | null {
+  const recipe = store.blend_recipe.find((r) => r.material_id === materialId && r.active)
+  if (!recipe) return null
+  return { ...recipe, components: recipeComponents(recipe.recipe_id) }
+}
+
+function blendPlan(params: Row): Row {
+  requireUser()
+  let materialId = params.material_id ? Number(params.material_id) : null
+  let plantId = params.plant_id ? Number(params.plant_id) : null
+  let order: Row | undefined
+  if (params.order_id) {
+    order = byId.order().get(Number(params.order_id))
+    if (!order) return notFound(`Order ${params.order_id} was not found.`)
+    materialId = materialId ?? order.material_one_id
+    plantId = plantId ?? order.plant_id
+  }
+  if (!materialId) invalid('Say what product to blend.', { material_id: 'Choose a product.' })
+  const material = byId.material().get(materialId!)!
+  const recipe = recipeForMaterial(materialId!)
+  if (!recipe) {
+    refuse(
+      `No recipe is set up for ${material.number} ${material.description}. `
+      + 'An administrator adds one under Products & limits.',
+      { rule: 'no_recipe', material_id: materialId },
+    )
+  }
+
+  let target = Number(params.quantity || 0)
+  if (target <= 0 && order) {
+    target = Math.max(order.material_one_quantity - progress(order).qty_fulfilled, 0)
+  }
+  target = Math.round(target * 100) / 100
+
+  const notes: string[] = []
+  if (order && target) notes.push(`${Math.round(target).toLocaleString()} lbs outstanding on order ${order.order_id}`)
+
+  // Balance per (location, material) at the plant, from the ledger.
+  const locPlant = new Map(store.location.map((l) => [l.location_id, l]))
+  const balances: Map<string, number> = new Map()
+  for (const t of store.inventory_transaction) {
+    if (t.to_location_id && locPlant.get(t.to_location_id)?.plant_id === plantId) {
+      const k = `${t.to_location_id}:${t.to_material_id}`
+      balances.set(k, (balances.get(k) ?? 0) + t.to_qty)
+    }
+    if (t.from_location_id && locPlant.get(t.from_location_id)?.plant_id === plantId) {
+      const k = `${t.from_location_id}:${t.from_material_id}`
+      balances.set(k, (balances.get(k) ?? 0) - t.from_qty)
+    }
+  }
+  const bestTank = (componentMaterial: number) => {
+    let best: { location: Row; balance: number } | null = null
+    for (const [key, balance] of balances) {
+      const [loc, mat] = key.split(':').map(Number)
+      if (mat !== componentMaterial || balance <= 0) continue
+      if (!best || balance > best.balance) best = { location: locPlant.get(loc)!, balance }
+    }
+    return best
+  }
+
+  const components = (recipe!.components as Row[]).map((component) => {
+    const required = Math.round(target * component.percentage) / 100
+    const tank = bestTank(component.material_id)
+    if (tank) {
+      notes.push(`${tank.location.number} holds the most ${component.material_number} `
+        + `(${Math.round(tank.balance).toLocaleString()} lbs)`)
+    }
+    return {
+      material_id: component.material_id,
+      material_number: component.material_number,
+      material_description: component.material_description,
+      percentage: component.percentage,
+      required,
+      from_location_id: tank?.location.location_id ?? null,
+      from_location_number: tank?.location.number ?? null,
+      available: Math.round((tank?.balance ?? 0) * 100) / 100,
+      short: required - (tank?.balance ?? 0) > 0.01,
+    }
+  })
+
+  const blendType = store.location_type.find((t) => t.name === 'Blend')?.location_type_id
+  const destination = store.location.find(
+    (l) => l.plant_id === plantId && l.active && l.location_type_id === blendType,
+  )
+  let headroom: number | null = null
+  if (destination?.max_capacity) {
+    let current = 0
+    for (const [key, balance] of balances) {
+      if (Number(key.split(':')[0]) === destination.location_id) current += balance
+    }
+    headroom = Math.round((destination.max_capacity - current) * 100) / 100
+    notes.push(`${destination.number} has room for ${Math.max(Math.round(headroom), 0).toLocaleString()} lbs`)
+  }
+
+  return {
+    order_id: order?.order_id ?? null,
+    material_id: materialId,
+    material_number: material.number,
+    material_description: material.description,
+    recipe: { recipe_id: recipe!.recipe_id, name: recipe!.name, notes: recipe!.notes },
+    quantity: target,
+    components,
+    to_location_id: destination?.location_id ?? null,
+    to_location_number: destination?.number ?? null,
+    destination_headroom: headroom,
+    short: components.some((c) => c.short),
+    does_not_fit: headroom !== null && target - headroom > 0.01,
+    notes,
+  }
+}
+
+function blendExecute(payload: Row): Row {
+  const user = requireUser()
+  requirePermission(user, 'txn.post')
+
+  const idempotencyKey = String(payload.idempotency_key ?? '').trim()
+  if (idempotencyKey) {
+    const already = store.inventory_transaction.find((t) => t.idempotency_key === idempotencyKey)
+    if (already?.batch_id) return blendBatch(already.batch_id)
+  }
+
+  const materialId = Number(payload.material_id || 0)
+  const quantity = Math.round(Number(payload.quantity || 0) * 100) / 100
+  const components: Row[] = payload.components ?? []
+  const fields: Record<string, string> = {}
+  if (!materialId) fields.material_id = 'Choose the product being blended.'
+  if (quantity <= 0) fields.quantity = 'Enter a quantity greater than zero.'
+  if (!payload.to_location_id) fields.to_location_id = 'Choose the tank the blend goes into.'
+  if (!components.length) fields.components = 'The batch has no components.'
+  if (Object.keys(fields).length) invalid('This batch cannot be blended.', fields)
+
+  const total = Math.round(components.reduce((sum, c) => sum + Number(c.quantity || 0), 0) * 100) / 100
+  if (Math.abs(total - quantity) > 0.5) {
+    invalid(
+      `The components add up to ${Math.round(total).toLocaleString()} lbs but the batch is `
+      + `${Math.round(quantity).toLocaleString()} lbs.`,
+      { components: 'Component quantities must sum to the batch quantity.' },
+    )
+  }
+
+  let order: Row | undefined
+  let plantId = payload.plant_id ? Number(payload.plant_id) : null
+  if (payload.order_id) {
+    order = byId.order().get(Number(payload.order_id))
+    if (!order) return notFound(`Order ${payload.order_id} was not found.`)
+    plantId = plantId ?? order.plant_id
+    if (order.material_one_id && order.material_one_id !== materialId) {
+      const wanted = byId.material().get(order.material_one_id)
+      refuse(`Order ${order.order_id} is for ${wanted?.number}, not this product.`,
+        { order_id: order.order_id })
+    }
+  }
+  if (!plantId) invalid('Choose a plant.', { plant_id: 'Choose a plant.' })
+  requirePlant(user, plantId!)
+
+  // Validate every component posts before writing any: the store has no
+  // rollback, so "check everything, then write everything" is what keeps a
+  // refused batch from half-happening. The stock and capacity checks in
+  // postTransaction run again per row; this pass exists to fail first.
+  for (const component of components) {
+    const available = balanceOf(Number(component.from_location_id), Number(component.material_id))
+    if (Number(component.quantity) - available > 0.01) {
+      const loc = byId.location().get(Number(component.from_location_id))
+      const mat = byId.material().get(Number(component.material_id))
+      refuse(
+        `${loc?.number} holds ${Math.round(available).toLocaleString()} lbs of ${mat?.number} — `
+        + `cannot take ${Math.round(Number(component.quantity)).toLocaleString()} lbs.`,
+        { available: Math.round(available), location: loc?.number, material: mat?.number },
+      )
+    }
+  }
+
+  const sequence = store.number_sequence.find((row) => row.key === 'blend')
+    ?? (store.number_sequence.push({ key: 'blend', next_value: 5_000 }),
+        store.number_sequence[store.number_sequence.length - 1])
+  const batchId = `B-${String(sequence.next_value).padStart(5, '0')}`
+  sequence.next_value += 1
+
+  const serial = order?.blend_serial_number || ''
+  components.forEach((component, index) => {
+    const txn = postTransaction('PRODUCE', {
+      order_id: order?.order_id ?? null,
+      plant_id: plantId,
+      from_location_id: component.from_location_id,
+      from_material_id: component.material_id,
+      from_qty: component.quantity,
+      to_location_id: payload.to_location_id,
+      to_material_id: materialId,
+      to_qty: component.quantity,
+      user_date: payload.user_date,
+      remarks: payload.remarks
+        || `Blend batch ${batchId}${serial ? ` (serial ${serial})` : ''}`,
+    })
+    const row = store.inventory_transaction.find((t) => t.transaction_id === txn.transaction_id)!
+    row.batch_id = batchId
+    row.idempotency_key = index === 0 && idempotencyKey ? idempotencyKey : null
+  })
+  audit('blend.batch', 'blend_batch', batchId,
+    `Blended ${Math.round(quantity).toLocaleString()} lbs in batch ${batchId}`
+    + (order ? ` on order ${order.order_id}` : ''),
+    { components, to_location_id: payload.to_location_id }, order?.order_id ?? null)
+  return blendBatch(batchId)
+}
+
+function blendBatch(batchId: string): Row {
+  const rows = store.inventory_transaction
+    .filter((t) => t.batch_id === batchId)
+    .sort((a, b) => a.transaction_id - b.transaction_id)
+    .map(hydrateTransaction)
+  if (!rows.length) return notFound(`Batch ${batchId} was not found.`)
+  return {
+    batch_id: batchId,
+    order_id: rows[0].order_id,
+    product_number: rows[0].to_material_number,
+    product_description: rows[0].to_material_description,
+    to_location_number: rows[0].to_location_number,
+    quantity: Math.round(rows.filter((r) => !r.voided).reduce((sum, r) => sum + r.to_qty, 0) * 100) / 100,
+    voided: rows.every((r) => r.voided),
+    transactions: rows,
+  }
+}
+
 /* ------------------------------------------------------------------ LIMS */
 
 const reportable = (row: Row) =>
@@ -2274,6 +2510,26 @@ async function route(method: string, path: string, body: Row): Promise<any> {
     requirePermission(requireUser(), 'txn.post')
     return recordScaleReading(body)
   }
+  if (method === 'GET' && match(path, '/api/blend/recipes')) {
+    requireUser()
+    return store.blend_recipe.filter((r) => r.active).map((r) => ({
+      ...r,
+      material_number: byId.material().get(r.material_id)?.number ?? null,
+      material_description: byId.material().get(r.material_id)?.description ?? null,
+      components: recipeComponents(r.recipe_id),
+    }))
+  }
+  if (method === 'GET' && match(path, '/api/blend/plan')) return blendPlan(params)
+  if (method === 'POST' && match(path, '/api/blend/execute')) return blendExecute(body)
+  if ((m = match(path, '/api/blend/batches/:id')) && method === 'GET') return blendBatch(m[0])
+  if ((m = match(path, '/api/blend/batches/:id/void')) && method === 'POST') {
+    const batchRows = store.inventory_transaction
+      .filter((t) => t.batch_id === m![0] && !t.voided && !t.is_reversal)
+    if (!batchRows.length) return notFound(`Batch ${m[0]} has nothing left to void.`)
+    for (const row of batchRows) voidTransaction(row.transaction_id, String(body.reason ?? ''))
+    return blendBatch(m![0])
+  }
+
   if (method === 'GET' && match(path, '/api/scale/latest')) {
     const plant = Number(params.plant_id ?? plantId ?? 1)
     let reading = latestScaleReading(plant, params.trailer_number ?? null)

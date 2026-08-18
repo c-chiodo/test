@@ -21,6 +21,8 @@ export interface Store {
   material_plant: Row[]
   material_test: Row[]
   material_spec: Row[]
+  blend_recipe: Row[]
+  blend_recipe_component: Row[]
   location_type: Row[]
   location: Row[]
   location_default: Row[]

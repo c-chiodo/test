@@ -335,3 +335,23 @@ weigh-out cannot be applied twice.
 
 If an integration stops, the job status goes stale in the support console before
 anyone notices missing data — that is the point of recording every run.
+
+## 17. Blending
+
+Operators blend from the **Blend** screen (kiosk-visible): pick the work
+order, the recipe scales to what the order still needs, tanks arrive chosen,
+one button posts the batch. Each batch is one PRODUCE row per component
+sharing a `batch_id` (`B-#####`), so Activity and Inquiry show it like any
+other movement.
+
+- **Recipes are data**, one active per product, edited via
+  `PUT /api/blend/recipes/{material_id}` (requires `spec.write`). The seeded
+  formulations are placeholders — each says so in its notes — and must be
+  replaced with the plant's real ones before production use.
+- **A wrong batch is voided whole**: `POST /api/blend/batches/{id}/void`
+  reverses every row together. Voiding one component of a blend is refused by
+  design; a tank cannot un-mix.
+- **A short component refuses the whole batch.** Nothing posts; the plan
+  screen shows which component and how much is on hand.
+- Batch history: `GET /api/blend/batches/{id}`, or filter Activity by the
+  order.

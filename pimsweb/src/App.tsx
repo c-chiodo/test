@@ -20,6 +20,7 @@ import Dashboard from './pages/Dashboard'
 import Orders from './pages/Orders'
 import OrderDetail from './pages/OrderDetail'
 import LoadAndShip from './pages/LoadAndShip'
+import Blend from './pages/Blend'
 import Operations from './pages/Operations'
 import Inventory from './pages/Inventory'
 import Inquiry from './pages/Inquiry'
@@ -61,6 +62,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Operations', items: [
     { route: 'dashboard', label: 'Dashboard', icon: '▤' },
     { route: 'load-ship', label: 'Load & ship', icon: '⇢', kiosk: true },
+    { route: 'blend', label: 'Blend', icon: '⚗', kiosk: true },
     { route: 'orders', label: 'Orders', icon: '▦', kiosk: true },
     { route: 'operations', label: 'Plant floor', icon: '⚙', kiosk: true },
     { route: 'inventory', label: 'Inventory', icon: '⛁', kiosk: true },
@@ -393,6 +395,8 @@ function Route({ path }: { path: string[] }) {
       return param ? <OrderDetail orderId={Number(param)} /> : <Orders />
     case 'load-ship':
       return <LoadAndShip initialOrderId={param ? Number(param) : undefined} />
+    case 'blend':
+      return <Blend />
     case 'operations':
       return <Operations initialOperation={param} />
     case 'inventory':
@@ -415,6 +419,7 @@ function titleFor(page: string): string {
     dashboard: 'Dashboard',
     orders: 'Orders',
     'load-ship': 'Load & ship',
+    blend: 'Blend',
     operations: 'Plant floor',
     inventory: 'Inventory',
     inquiry: 'Inquiry',

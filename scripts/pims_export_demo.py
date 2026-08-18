@@ -34,6 +34,8 @@ TABLES = [
     "material_plant",
     "material_test",
     "material_spec",
+    "blend_recipe",
+    "blend_recipe_component",
     "location_type",
     "location",
     "location_default",

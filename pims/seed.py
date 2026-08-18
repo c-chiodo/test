@@ -317,7 +317,21 @@ SYSTEM_SETTINGS = [
 
 #: Counters start above the numbers already in the legacy series so a generated
 #: number can never collide with a historical one.
-NUMBER_SEQUENCES = [("bol", 112_000), ("sample", 400_000)]
+NUMBER_SEQUENCES = [("bol", 112_000), ("sample", 400_000), ("blend", 5_000)]
+
+#: (product number, recipe name, [(component number, percentage by weight)]).
+#:
+#: The *structure* is real — these are the products the plant blends, from the
+#: raw materials it receives. The *numbers* are invented: the legacy order
+#: table referenced a Blend_recipe_id, but the recipes themselves were not in
+#: the material provided. Each seeded recipe says so in its notes; replace
+#: them with the plant's real formulations before anyone blends to them.
+BLEND_RECIPES = [
+    ("01020", "FE Cattle Blend - 2.5", [("02001", 40.0), ("00010", 58.0), ("00001", 2.0)]),
+    ("01021", "FE Cattle Blend - 3.5", [("02001", 50.0), ("00010", 48.5), ("00001", 1.5)]),
+    ("01031", "MGR veg - 2.5", [("02005", 35.0), ("00010", 63.0), ("00001", 2.0)]),
+    ("05001", "AV4000", [("02005", 70.0), ("02001", 30.0)]),
+]
 
 #: Kiosk PINs for the shared plant terminal. Demo values.
 USER_PINS = {"cchiodo": "4021", "jmartin": "2210", "rprice": "3317", "toperator": "5588"}
@@ -331,10 +345,36 @@ def seed_all(conn: sqlite3.Connection | None = None) -> None:
     with db.transaction(conn):
         _seed_reference(conn)
         material_ids = _seed_materials(conn)
+        _seed_recipes(conn, material_ids)
         location_ids = _seed_locations(conn)
         _seed_partners(conn)
         user_ids = _seed_users(conn)
         _seed_activity(conn, rng, material_ids, location_ids, user_ids)
+
+
+def _seed_recipes(conn, material_ids: dict[str, int]) -> None:
+    for product, name, parts in BLEND_RECIPES:
+        recipe_id = db.insert(
+            "blend_recipe",
+            {
+                "material_id": material_ids[product],
+                "name": name,
+                "notes": "Demo formulation — replace with the plant's real recipe.",
+                "active": 1,
+            },
+            conn,
+        )
+        for index, (component, pct) in enumerate(parts):
+            db.insert(
+                "blend_recipe_component",
+                {
+                    "recipe_id": recipe_id,
+                    "material_id": material_ids[component],
+                    "percentage": pct,
+                    "sort_order": index * 10,
+                },
+                conn,
+            )
 
 
 def _seed_reference(conn) -> None:
@@ -785,16 +825,21 @@ def _seed_activity(conn, rng, material_ids, tanks_by_plant, user_ids) -> None:
                         }
                     )
                 elif kind == 2:
+                    # Open work orders keep work: roughly half are produced
+                    # part-way, so the Blend screen has batches left to run.
+                    produced = qty
+                    if not closed and rng.random() < 0.5:
+                        produced = round(qty * rng.uniform(0.2, 0.6), 1)
                     write(
                         {
                             **base,
                             "transaction_type_id": 2,
                             "from_material_id": source_material,
                             "from_location_id": source,
-                            "from_qty": qty,
+                            "from_qty": produced,
                             "to_material_id": material_id,
                             "to_location_id": tank,
-                            "to_qty": round(qty * rng.uniform(0.985, 0.999), 1),
+                            "to_qty": round(produced * rng.uniform(0.985, 0.999), 1),
                             "tank_hours": round(rng.uniform(1.0, 6.0), 1),
                             "employee_hours": round(rng.uniform(0.5, 3.0), 1),
                         }

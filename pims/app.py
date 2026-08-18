@@ -25,8 +25,8 @@ from .errors import AuthError, PimsError
 from .integrations import gp_sync, lims_ingest
 from .integrations import scale as scale_integration
 from .services import (
-    alerts, inquiry, inventory, jobs, lims, numbering, orders, prefill, qc, query,
-    reference, scan, specs,
+    alerts, blend, inquiry, inventory, jobs, lims, numbering, orders, prefill, qc,
+    query, reference, scan, specs,
 )
 from .util import utc_now
 
@@ -560,6 +560,53 @@ def set_tests(material_id: int, payload: dict = Body(...), user: dict = User) ->
         detail={"analytes": analytes},
     )
     return {"material_id": material_id, "analytes": analytes}
+
+
+# ----------------------------------------------------------------- blending
+
+
+@app.get("/api/blend/recipes", tags=["blend"])
+def blend_recipes(user: dict = User) -> list[dict]:
+    return blend.recipes()
+
+
+@app.put("/api/blend/recipes/{material_id}", tags=["blend"])
+def set_blend_recipe(material_id: int, payload: dict = Body(...), user: dict = User) -> dict:
+    return blend.set_recipe(
+        material_id,
+        payload.get("name") or f"Recipe {material_id}",
+        payload.get("components") or [],
+        user,
+        notes=payload.get("notes", ""),
+    )
+
+
+@app.get("/api/blend/plan", tags=["blend"])
+def blend_plan(
+    order_id: int | None = None,
+    material_id: int | None = None,
+    quantity: float | None = None,
+    plant_id: int | None = None,
+    user: dict = User,
+) -> dict:
+    return blend.plan(
+        order_id=order_id, material_id=material_id, quantity=quantity, plant_id=plant_id
+    )
+
+
+@app.post("/api/blend/execute", tags=["blend"], status_code=201)
+def blend_execute(payload: dict = Body(...), user: dict = User) -> dict:
+    return blend.execute(payload, user)
+
+
+@app.get("/api/blend/batches/{batch_id}", tags=["blend"])
+def blend_batch(batch_id: str, user: dict = User) -> dict:
+    return blend.batch(batch_id)
+
+
+@app.post("/api/blend/batches/{batch_id}/void", tags=["blend"])
+def void_blend_batch(batch_id: str, payload: dict = Body(default={}), user: dict = User) -> dict:
+    return blend.void_batch(batch_id, payload.get("reason", ""), user)
 
 
 # -------------------------------------------------------------------- LIMS

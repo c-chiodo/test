@@ -234,6 +234,9 @@ CREATE TABLE IF NOT EXISTS inventory_transaction (
     -- count toward balances (they cancel); fulfilment maths excludes the pair.
     voided               INTEGER NOT NULL DEFAULT 0,
     is_reversal          INTEGER NOT NULL DEFAULT 0,
+    -- Groups the rows of one blend batch: a batch consumes several components
+    -- and produces one product, and its ledger rows stand or fall together.
+    batch_id             TEXT,
     -- Minted by the client before it posts and held until the post succeeds.
     -- If the answer is lost on the way back — plant Wi-Fi, a closed laptop —
     -- the retry carries the same key and returns the transaction that already
@@ -241,6 +244,7 @@ CREATE TABLE IF NOT EXISTS inventory_transaction (
     idempotency_key      TEXT
 );
 
+CREATE INDEX IF NOT EXISTS ix_txn_batch ON inventory_transaction (batch_id);
 CREATE UNIQUE INDEX IF NOT EXISTS ux_txn_idempotency
     ON inventory_transaction (idempotency_key) WHERE idempotency_key IS NOT NULL;
 
@@ -448,6 +452,33 @@ CREATE TABLE IF NOT EXISTS system_setting (
 -- Counters behind generated BOL and sample numbers. Kept in the database
 -- rather than derived from MAX(), so two loadout terminals cannot mint the
 -- same number in the same second.
+-- ------------------------------------------------------------------ blending
+--
+-- How a product is made from what the tanks hold. A recipe belongs to the
+-- product it makes (one active recipe per product), and its components are
+-- percentages by weight that sum to 100. The batch that executes a recipe is
+-- ordinary ledger rows sharing a batch_id — blending invents no new kind of
+-- movement, it is PRODUCE, several times, atomically.
+
+CREATE TABLE IF NOT EXISTS blend_recipe (
+    recipe_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    material_id INTEGER NOT NULL REFERENCES material(material_id),
+    name        TEXT NOT NULL,
+    notes       TEXT NOT NULL DEFAULT '',
+    active      INTEGER NOT NULL DEFAULT 1
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS ux_recipe_material
+    ON blend_recipe (material_id) WHERE active = 1;
+
+CREATE TABLE IF NOT EXISTS blend_recipe_component (
+    component_id INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipe_id    INTEGER NOT NULL REFERENCES blend_recipe(recipe_id),
+    material_id  INTEGER NOT NULL REFERENCES material(material_id),
+    percentage   REAL NOT NULL,
+    sort_order   INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS number_sequence (
     key        TEXT PRIMARY KEY,
     next_value INTEGER NOT NULL DEFAULT 1

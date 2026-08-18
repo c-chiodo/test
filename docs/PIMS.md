@@ -142,6 +142,7 @@ Three invariants are enforced in `post()` rather than left to the screens:
 | "You are in the TEST environment" | Environment badge in the top bar | |
 | Customers / Materials / Requirements | **Products & limits**, requirements shown on the order | Master data still originates in Great Plains |
 | — | **Load & ship** | New: trailer check → load → QC → sign-off → BOL in one flow, pre-filled, and resumable after a sign-out |
+| Blend (via `Blend_recipe_id`) | **Blend** | Recipes as data; pick the work order, the batch arrives scaled with tanks chosen, one button posts it whole |
 | — | Kiosk mode | New: PIN sign-in, touch layout and idle sign-out for a shared plant terminal |
 | — | Scan box | New: one box resolves an order, sample, BOL, tank, product or trailer |
 | — | **Support console** | New: health, data quality, alerts, scheduled jobs, audit trail, failures |
@@ -172,6 +173,25 @@ watches what nobody was watching, and never decides something a person should.
 Every one of these is a setting away from being turned off, and every job runs
 with `--dry-run` first. See [PIMS_RUNBOOK.md](PIMS_RUNBOOK.md) §12–16.
 
+### Blending
+
+The legacy `Order` carried a `Blend_recipe_id`, but the recipes themselves were
+not in the material provided — so the *structure* here is real and the *seeded
+formulations* are invented placeholders, each saying so in its notes. Replace
+them (Products & limits, or `PUT /api/blend/recipes/{material_id}`) before
+anyone blends to them.
+
+- A recipe belongs to the product it makes: components as percentages by
+  weight, summing to 100. Replacing a recipe deactivates the old one rather
+  than editing it, so "what was the formula when this batch ran?" keeps an
+  answer.
+- A batch is ordinary ledger rows — one PRODUCE per component, sharing a
+  `batch_id` — posted atomically. Every existing rule (stock, capacity, plant
+  access, voiding, idempotent retry) applies unchanged, and fulfilment counts
+  the output against the work order.
+- Voiding is per batch, never per component: half a blend is not a state a
+  tank can be in.
+
 ## What is not built
 
 Stated plainly, because a replacement that quietly drops features is worse than
@@ -193,8 +213,6 @@ one with a known gap list:
   narrow (`pims/db.py`) and the migration document sets out the SQL Server path.
 - **Label printing** ("Save and Print Sample Labels") and the maintenance
   request / customer issue menu items.
-- **Blend recipes.** The legacy `Order` carries a `Blend_recipe_id`; recipes
-  themselves were not part of the material provided.
 
 ## Running it
 
