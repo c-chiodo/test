@@ -1909,6 +1909,24 @@ function dataQuality(plantId?: number | null): Row {
     .filter((r) => inPlant(r) && String(r.sample_number || '').trim() && !limsSamples.has(r.sample_number))
     .map(describeQc)
 
+  // Loading before the trailer check is allowed but not invisible. Derived
+  // from the records rather than from the remark the client wrote, so it holds
+  // however the load was posted.
+  const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString()
+  const loadTypeId = store.transaction_type.find((t) => t.code === 'LOAD')?.transaction_type_id
+  const uncheckedLoads = store.inventory_transaction
+    .filter((t) => t.transaction_type_id === loadTypeId && !t.voided && !t.is_reversal
+      && t.transaction_date >= sevenDaysAgo
+      && (!plantId || t.plant_id === Number(plantId))
+      && !store.qa_header.some((h) => h.order_id === t.order_id && !h.voided
+        && (h.stage ?? 'post_load') === 'pre_load' && h.date_added <= t.transaction_date))
+    .map((t) => ({
+      transaction_id: t.transaction_id, order_id: t.order_id, trailer_number: t.trailer_number,
+      quantity: t.from_qty, loaded_at: t.transaction_date,
+      plant_code: byId.plant().get(t.plant_id)?.code,
+      loaded_by: byId.user().get(t.user_id)?.full_name ?? null,
+    }))
+
   const negative = all.filter((row) => scoped(row) && row.balance < -0.01)
   const overCapacity = all.filter((row) => scoped(row) && row.max_capacity && row.balance > row.max_capacity + 0.01)
 
@@ -1921,6 +1939,8 @@ function dataQuality(plantId?: number | null): Row {
       action: 'Ship the load in PIMS, or void the load transaction if it never left.' },
     { key: 'overdue_orders', label: 'Open orders past their due date', severity: 'low', rows: overdue,
       action: 'Close, reschedule, or cancel.' },
+    { key: 'unchecked_loads', label: 'Trailers loaded before the trailer check was answered', severity: 'medium', rows: uncheckedLoads,
+      action: 'Ask the loader to complete the trailer check on the order. If this is routine rather than occasional, the check is being treated as paperwork.' },
     { key: 'qc_without_sample', label: 'QC records saved without a sample number', severity: 'medium', rows: withoutSample,
       action: 'Add the sample number so LIMS results can be matched to the load.' },
     { key: 'unmatched_samples', label: 'QC sample numbers with no LIMS result', severity: 'medium', rows: unmatched,

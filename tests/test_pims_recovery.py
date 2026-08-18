@@ -640,3 +640,67 @@ def test_an_orders_history_includes_its_loads_and_its_qc(
     actions = {row["action"] for row in history}
     assert "post.load" in actions
     assert "qc.create" in actions
+
+
+def test_a_load_posts_without_the_trailer_check(conn, admin_user, sales_order, stocked_tank):
+    """The trailer check advises; it does not stand between a truck and the dock."""
+
+    tank, material = stocked_tank
+    load = _load(conn, admin_user, sales_order, tank, material, qty=900)
+    assert load["transaction_id"]
+
+
+def test_a_load_before_the_trailer_check_is_reported(
+    conn, admin_user, sales_order, stocked_tank
+):
+    """Skipping it is allowed. It is not invisible."""
+
+    from pims import health
+
+    tank, material = stocked_tank
+    load = _load(conn, admin_user, sales_order, tank, material, qty=800)
+
+    finding = next(
+        f for f in health.data_quality(plant_id=1, conn=conn)["findings"]
+        if f["key"] == "unchecked_loads"
+    )
+    assert load["transaction_id"] in [row["transaction_id"] for row in finding["rows"]]
+
+
+def test_answering_the_trailer_check_first_clears_the_finding(
+    conn, admin_user, stocked_tank
+):
+    from pims import health
+
+    tank, material = stocked_tank
+    order_id = orders.create(
+        {
+            "order_type_id": 1,
+            "plant_id": 1,
+            "company_id": 1,
+            "department_id": 1,
+            "order_date": "2026-08-17",
+            "due_date": "2026-08-18",
+            "customer_id": db.scalar("SELECT customer_id FROM customer LIMIT 1", (), conn),
+            "material_one_id": material,
+            "material_one_quantity": 40_000,
+        },
+        admin_user,
+        conn,
+    )[0]["order_id"]
+
+    pre = qc.checklist_questions("pre_load", conn=conn)
+    qc.save_qa_checklist(
+        order_id,
+        {"responses": {str(q["question_id"]): "Yes" for q in pre}},
+        admin_user,
+        conn,
+        stage="pre_load",
+    )
+    load = _load(conn, admin_user, order_id, tank, material, qty=700)
+
+    finding = next(
+        f for f in health.data_quality(plant_id=1, conn=conn)["findings"]
+        if f["key"] == "unchecked_loads"
+    )
+    assert load["transaction_id"] not in [row["transaction_id"] for row in finding["rows"]]

@@ -963,32 +963,45 @@ def _seed_qc(conn, rng, *, order_id, plant_id, material_number, material_id, sta
         )
 
     if rng.random() < 0.35:
-        header_id = db.insert(
-            "qa_header",
-            {
-                "order_id": order_id,
-                "plant_id": plant_id,
-                "qc_id": qc_id,
-                "trailer_number": str(rng.randrange(100, 999)),
-                "trailer_load_time": iso,
-                "date_added": iso,
-                "added_by": username,
-            },
-            conn,
-        )
-        for qid, _q, answer_type, _stage, _o in QA_QUESTIONS:
-            if rng.random() < 0.05:
-                # Some questions genuinely do not apply — a tank wagon with no
-                # hoses to cap. Seeded so the N/A path has data behind it.
-                response = "N/A"
-            elif answer_type == "yesno":
-                response = "Yes" if rng.random() < 0.94 else "No"
-            elif answer_type == "number":
-                response = str(round(rng.uniform(100, 135), 1))
-            else:
-                response = f"W{rng.randrange(10_000, 99_999)}"
-            db.insert(
-                "qa_response",
-                {"header_id": header_id, "question_id": qid, "response": response},
+        # Two passes, the way the flow records them: the trailer inspection
+        # before the product goes in, the seals and load temperature after. A
+        # minority of loads skip the first one — which is what the "loaded
+        # before the trailer check" probe is there to surface.
+        trailer = str(rng.randrange(100, 999))
+        stages = ["pre_load", "post_load"]
+        if rng.random() < 0.15:
+            stages.remove("pre_load")
+        for stage in stages:
+            questions = [q for q in QA_QUESTIONS if q[3] == stage]
+            if not questions:
+                continue
+            header_id = db.insert(
+                "qa_header",
+                {
+                    "order_id": order_id,
+                    "plant_id": plant_id,
+                    "qc_id": qc_id if stage == "post_load" else None,
+                    "trailer_number": trailer,
+                    "trailer_load_time": iso,
+                    "stage": stage,
+                    "date_added": iso,
+                    "added_by": username,
+                },
                 conn,
             )
+            for qid, _q, answer_type, _stage, _o in questions:
+                if rng.random() < 0.05:
+                    # Some questions genuinely do not apply — a tank wagon with
+                    # no hoses to cap. Seeded so the N/A path has data behind it.
+                    response = "N/A"
+                elif answer_type == "yesno":
+                    response = "Yes" if rng.random() < 0.94 else "No"
+                elif answer_type == "number":
+                    response = str(round(rng.uniform(100, 135), 1))
+                else:
+                    response = f"W{rng.randrange(10_000, 99_999)}"
+                db.insert(
+                    "qa_response",
+                    {"header_id": header_id, "question_id": qid, "response": response},
+                    conn,
+                )

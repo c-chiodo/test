@@ -117,7 +117,7 @@ look at which rule.
 
 ## 7. The numbers look wrong
 
-**Support console → Data quality** runs six probes and shows the rows behind
+**Support console → Data quality** runs seven probes and shows the rows behind
 each, with what to do:
 
 | Finding | Usual cause |
@@ -126,6 +126,7 @@ each, with what to do:
 | Locations over stated capacity | the capacity on the location record is wrong, or a receipt was overstated |
 | Trailers loaded over 2 days ago and never shipped | the ship step was skipped in PIMS after the truck left — usually a kiosk sign-out mid-flow, which Load & ship now offers to resume |
 | Open orders past their due date | housekeeping |
+| Trailers loaded before the trailer check was answered | the loader posted first and meant to come back; if it is routine rather than occasional, the check is being treated as paperwork |
 | QC records with no sample number | the LIMS result cannot be matched back to the load |
 | QC sample numbers with no LIMS result | either the sample was never logged in LabWare, or §4 |
 

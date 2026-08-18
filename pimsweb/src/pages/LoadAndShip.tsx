@@ -32,8 +32,14 @@ interface ScaleReading {
 
 /* The trailer inspection comes before the load, not after it. Four of the
  * checklist questions ask whether an *empty* trailer is clean, dry and
- * compatible with the product; asking them once the product is aboard makes
- * them paperwork rather than a check. */
+ * compatible with the product, and asking them once the product is aboard
+ * makes them paperwork rather than a check.
+ *
+ * It is the order of the steps, not a lock. An operator with a driver waiting
+ * can post the load and answer afterwards; the load is then marked as having
+ * been posted before the trailer check, which is a fact a supervisor can act
+ * on. A screen that refuses to let someone do their job is a screen they route
+ * around, and then nobody knows anything. */
 const STEPS = ['Order', 'Trailer', 'Load', 'Quality', 'Sign-off', 'Ship'] as const
 type Step = (typeof STEPS)[number]
 
@@ -379,6 +385,12 @@ function LoadStep({
       payload.to_qty = payload.from_qty
       payload.idempotency_key = idempotencyKey.current
       if (acknowledgeOverLoad) payload.acknowledge_over_load = true
+      // Skipping the trailer check is allowed, but it is not invisible: the
+      // ledger row says so, which is what the Activity screen and the daily
+      // data-quality probe read.
+      if (!preLoadDone && !String(payload.remarks ?? '').trim()) {
+        payload.remarks = 'Posted before the trailer check'
+      }
       if (reading) payload.scale_reading_id = reading.reading_id
       delete payload.bol_preview
       const txn = await api.post<any>('/api/transactions/load', payload)
@@ -479,11 +491,19 @@ function LoadStep({
           </div>
         )}
 
+        {/* A warning, not a gate. The clean-and-dry questions genuinely belong
+            before the product goes in, but an operator standing at a loadout
+            rack with a driver waiting is not the person to argue with about
+            paperwork — and a screen that will not let them work is a screen
+            they route around. The load is theirs to post; the record says
+            whether the trailer was checked first. */}
         {!preLoadDone && (
           <div style={{ marginTop: 12 }}>
-            <Alert tone="warn" title="The trailer has not been checked">
+            <Alert tone="warn" title="The trailer has not been checked yet">
               The clean, dry and previous-load questions are about an empty trailer, so they
-              are asked before the product goes in.
+              are worth answering before the product goes in. You can post the load anyway
+              and come back to them — the load will be marked as posted before the trailer
+              check.
               <div className="row" style={{ gap: 8, marginTop: 10 }}>
                 <button className="sm primary" onClick={onCheckTrailer}>Check the trailer</button>
               </div>
@@ -501,7 +521,7 @@ function LoadStep({
           <button
             className="primary"
             onClick={() => post()}
-            disabled={busy || overdrawn || !form.from_qty || !preLoadDone}
+            disabled={busy || overdrawn || !form.from_qty}
           >
             {busy ? <span className="spinner" /> : null} Post load
           </button>

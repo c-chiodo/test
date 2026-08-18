@@ -257,6 +257,33 @@ def data_quality(plant_id: int | None = None, conn=None) -> dict[str, Any]:
         conn,
     )
 
+    # Loading before the trailer has been checked is allowed — an operator with
+    # a driver waiting should not be stuck behind a form — but it is not
+    # invisible. Derived from the records rather than from what the client
+    # wrote in the remarks, so it holds however the load was posted.
+    unchecked_loads = db.query(
+        f"""
+        SELECT t.transaction_id, t.order_id, t.trailer_number, t.from_qty AS quantity,
+               t.transaction_date AS loaded_at, p.code AS plant_code, u.full_name AS loaded_by
+        FROM inventory_transaction t
+        JOIN transaction_type tt ON tt.transaction_type_id = t.transaction_type_id
+        JOIN "order" o ON o.order_id = t.order_id
+        JOIN plant p ON p.plant_id = o.plant_id
+        JOIN app_user u ON u.user_id = t.user_id
+        WHERE tt.code = 'LOAD' AND t.voided = 0 AND t.is_reversal = 0
+          AND t.transaction_date >= datetime('now', '-7 days')
+          AND NOT EXISTS (
+              SELECT 1 FROM qa_header h
+              WHERE h.order_id = t.order_id AND h.voided = 0
+                AND h.stage = 'pre_load' AND h.date_added <= t.transaction_date
+          ){plant_clause}
+        ORDER BY t.transaction_date DESC
+        LIMIT 100
+        """,
+        params,
+        conn,
+    )
+
     findings = [
         {
             "key": "negative_balance",
@@ -289,6 +316,17 @@ def data_quality(plant_id: int | None = None, conn=None) -> dict[str, Any]:
             "count": len(overdue),
             "rows": overdue[:25],
             "action": "Close, reschedule, or cancel.",
+        },
+        {
+            "key": "unchecked_loads",
+            "label": "Trailers loaded before the trailer check was answered",
+            "severity": "medium",
+            "count": len(unchecked_loads),
+            "rows": unchecked_loads[:25],
+            "action": (
+                "Ask the loader to complete the trailer check on the order. If this is "
+                "routine rather than occasional, the check is being treated as paperwork."
+            ),
         },
         {
             "key": "qc_without_sample",
