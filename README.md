@@ -54,6 +54,7 @@ soyoil/               core science + ML package
 api/main.py           FastAPI app (OpenAPI docs at /docs)
 web/                  React + Vite + Recharts app (marketing + dashboard)
 pid/                  agentic P&ID builder (separate tool — see docs/PID_BUILDER.md)
+ap_agent/             AP agent: emailed POs → Dynamics GP receipts (docs/AP_AGENT.md)
 tests/                model credibility gates + P&ID builder suite
 research/             three deep research briefs (agronomy, data sources, ML design)
 docs/MODEL_CARD.md    validation, limitations, and what we must not claim
@@ -81,6 +82,25 @@ ordinary code, so `pid validate`, `pid render` and `pid export` are free and
 reproducible. It produces a drawing for engineers to review; it is not a
 substitute for a HAZOP or a P.E. stamp. Details in
 [docs/PID_BUILDER.md](docs/PID_BUILDER.md).
+
+## Also in this repo: the AP agent
+
+`ap_agent/` eliminates manual entry of emailed purchase-order documents into
+Microsoft Dynamics GP. It reads the PO inbox, extracts order data with Claude,
+validates it against the open PO in GP (vendor, items, quantities, prices),
+and emits eConnect receivings XML for posting — routing anything uncertain to
+a human review queue. Corrections made during review are remembered per
+vendor (item aliases, unit-of-measure conventions, layout notes), so the
+agent gets smarter about each vendor's document layout with use, and trusted
+vendors graduate to straight-through processing.
+
+```bash
+pip install -e ".[ap]"
+python -m ap_agent process --eml-dir examples/ap_emails \
+    --masterdata examples/gp_masterdata --stub   # offline demo, no API key
+```
+
+Details in [docs/AP_AGENT.md](docs/AP_AGENT.md).
 
 ## API surface
 

@@ -1,0 +1,19 @@
+Message-ID: <acme-ship-88121@acmefeed.example.com>
+From: shipping@acmefeed.example.com
+To: ap@feedenergy.com
+Subject: Shipment confirmation - your PO-2001
+Content-Type: text/plain; charset="utf-8"
+
+Acme Feed Supplies - Shipment Notice
+
+po_number: PO-2001
+vendor: Acme Feed Supplies
+packing_slip: PS-88121
+date: 2026-08-14
+
+lines:
+vendor_item | description | qty | uom | unit_cost
+ASM48 | Soybean Meal 48% | 40 | TON | 412.50
+ALYS-H | L-Lysine HCl 98.5% | 2000 | LB | 1.18
+
+total: 19860.00

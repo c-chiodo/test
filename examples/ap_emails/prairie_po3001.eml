@@ -1,0 +1,18 @@
+Message-ID: <prairie-inv-4471@prairieing.example.com>
+From: billing@prairieing.example.com
+To: ap@feedenergy.com
+Subject: Invoice 4471 against Cust PO PO-3001
+Content-Type: text/plain; charset="utf-8"
+
+PRAIRIE INGREDIENTS LLC
+
+po: PO-3001
+vendor: Prairie Ingredients LLC
+invoice: INV-4471
+date: 2026-08-15
+
+lines:
+DDGS-BULK | Distillers Dried Grains w/ Solubles | 60 | TON | 198.00
+CHL-60 | Choline Chloride 60% | 5000 | LB | 0.92
+
+total: 16480.00

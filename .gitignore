@@ -4,6 +4,8 @@ __pycache__/
 .pytest_cache/
 node_modules/
 soyoil/data/cache/
+data/ap_agent.db
+data/ap_outbox/
 # web/dist and soyoil/models artifacts are committed on purpose so cloud
 # hosts can serve the app with a plain `pip install` — no Node, no training.
 nohup.out

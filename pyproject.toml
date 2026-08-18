@@ -9,13 +9,17 @@ requires-python = ">=3.11"
 # rendering and exporting a saved P&ID are pure local work, so the SDK stays out
 # of requirements.txt and off the deployed web app's image.
 pid = ["anthropic>=0.60", "pydantic>=2.7"]
+# The AP agent needs the SDK only for live extraction; the pipeline,
+# validation, review queue and eConnect output all run without it.
+ap = ["anthropic>=0.60", "pydantic>=2.7"]
 
 [project.scripts]
 pid = "pid.cli:main"
+ap-agent = "ap_agent.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
 
 [tool.setuptools]
-packages = ["soyoil", "api", "pid", "pid.agents"]
+packages = ["soyoil", "api", "pid", "pid.agents", "ap_agent"]
