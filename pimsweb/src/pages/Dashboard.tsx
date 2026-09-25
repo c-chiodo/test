@@ -5,6 +5,7 @@ import {
   Alert, Badge, Card, DataTable, ErrorBox, Loading, Meter, Stat,
   fmtDateTime, fmtLbs, useAsync,
 } from '../components/ui'
+import PopOutTanks from '../components/PopOutTanks'
 
 interface DashboardData {
   open_orders: number
@@ -124,7 +125,12 @@ export default function Dashboard() {
         <Card
           title="Tank levels"
           subtitle="Current balance against stated capacity"
-          actions={<button className="sm" onClick={() => navigate('inventory')}>All locations</button>}
+          actions={
+            <span className="row" style={{ gap: 6, flexWrap: 'nowrap' }}>
+              <PopOutTanks />
+              <button className="sm" onClick={() => navigate('inventory')}>All locations</button>
+            </span>
+          }
           tight
         >
           {balances.loading ? <Loading /> : (

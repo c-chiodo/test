@@ -330,28 +330,44 @@ def test_plant_access_is_enforced_on_writes(conn):
 
 
 def test_balance_can_be_reconstructed_at_a_point_in_time(conn, admin_user):
-    tank = _location_id("DM-T102", conn)
-    material = _material_id("05001", conn)
-    before = inventory.balance_of(tank, material, conn)
+    """A receipt from January and one from today: "as of June" sees only the first."""
 
-    inventory.post(
-        "RECEIVE",
+    import uuid
+
+    tank = db.insert(
+        "location",
         {
+            "number": f"DM-ASOF-{uuid.uuid4().hex[:6].upper()}",
+            "description": "Point-in-time test tank",
+            "location_type_id": db.scalar("SELECT location_type_id FROM location_type WHERE name = 'Tank'", (), conn),
             "plant_id": 1,
-            "to_location_id": tank,
-            "to_material_id": material,
-            "to_qty": 1_500,
-            "to_bol": "001-ASOF-1",
+            "max_capacity": 250_000,
+            "active": 1,
         },
-        admin_user,
         conn,
     )
-    historic = inventory.location_balance(
-        location_id=tank,
-        material_id=material,
-        as_of="2026-08-01T00:00:00+00:00",
-        conn=conn,
+    material = _material_id("05001", conn)
+
+    def receive(qty: float) -> dict:
+        return inventory.post(
+            "RECEIVE",
+            {"plant_id": 1, "to_location_id": tank, "to_material_id": material, "to_qty": qty,
+             "to_bol": f"001-ASOF-{qty:.0f}"},
+            admin_user,
+            conn,
+        )
+
+    january = receive(4_000)
+    db.execute(
+        "UPDATE inventory_transaction SET transaction_date = '2026-01-15T08:00:00+00:00'"
+        " WHERE transaction_id = ?",
+        (january["transaction_id"],),
+        conn,
     )
-    now = inventory.balance_of(tank, material, conn)
-    assert now == pytest.approx(before + 1_500)
-    assert historic[0]["balance"] != now
+    receive(1_500)
+
+    historic = inventory.location_balance(
+        location_id=tank, material_id=material, as_of="2026-06-01T00:00:00+00:00", conn=conn
+    )
+    assert historic[0]["balance"] == pytest.approx(4_000)
+    assert inventory.balance_of(tank, material, conn) == pytest.approx(5_500)

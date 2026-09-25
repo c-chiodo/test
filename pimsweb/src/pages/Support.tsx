@@ -33,6 +33,7 @@ export default function Support() {
           { key: 'jobs', label: 'Scheduled jobs' },
           { key: 'audit', label: 'Audit trail' },
           { key: 'errors', label: 'Errors' },
+          { key: 'boards', label: 'Tank boards' },
         ]}
       />
       {tab === 'health' && <Health />}
@@ -41,6 +42,7 @@ export default function Support() {
       {tab === 'jobs' && <Jobs />}
       {tab === 'audit' && <Audit />}
       {tab === 'errors' && <Errors />}
+      {tab === 'boards' && <Boards />}
     </>
   )
 }
@@ -490,5 +492,49 @@ function Errors() {
         />
       </Card>
     </>
+  )
+}
+
+/* Tank board links: every screen running a board, and a way to switch one off
+ * — a lost laptop, a screen moved to the wrong building. */
+function Boards() {
+  const toast = useToast()
+  const boards = useAsync(() => api.get<any[]>('/api/display/tokens'), [])
+
+  async function revoke(tokenId: number) {
+    try {
+      await api.post(`/api/display/tokens/${tokenId}/revoke`, {})
+      toast.push('success', 'Board link switched off', 'That screen stops updating within 30 seconds.')
+      boards.reload()
+    } catch (error) {
+      toast.push('error', 'Could not switch it off', (error as Error).message)
+    }
+  }
+
+  return (
+    <Card title="Tank board links" subtitle="Screens showing a tank board. Each can read one plant's tank levels and nothing else." tight>
+      {boards.loading ? <Loading /> : boards.error ? <ErrorBox error={boards.error} /> : (
+        <DataTable
+          rows={boards.data ?? []}
+          rowKey={(row) => row.token_id}
+          empty="No tank boards have been opened."
+          columns={[
+            { key: 'label', label: 'Board' },
+            { key: 'plant_id', label: 'Plant' },
+            { key: 'created_by', label: 'Opened by' },
+            { key: 'created_at', label: 'Opened', render: (row) => fmtDateTime(row.created_at) },
+            { key: 'last_seen', label: 'Last seen', render: (row) => row.last_seen ? fmtDateTime(row.last_seen) : 'never' },
+            { key: 'expires_at', label: 'Expires', render: (row) => fmtDateTime(row.expires_at) },
+            {
+              key: 'state',
+              label: '',
+              render: (row) => row.revoked
+                ? <Badge>switched off</Badge>
+                : <button className="sm" onClick={() => revoke(row.token_id)}>Switch off</button>,
+            },
+          ]}
+        />
+      )}
+    </Card>
   )
 }

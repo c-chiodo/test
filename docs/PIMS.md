@@ -146,11 +146,56 @@ Three invariants are enforced in `post()` rather than left to the screens:
 | Change Plant | Plant switcher in the top bar | |
 | "You are in the TEST environment" | Environment badge in the top bar | |
 | Customers / Materials / Requirements | **Products & limits**, requirements shown on the order | Master data still originates in Great Plains |
-| — | **Load & ship** | New: trailer check → load → QC → sign-off → BOL in one flow, pre-filled, and resumable after a sign-out |
+| — | **Today** | New: the operator's home — every truck to load, batch to blend and trailer to ship at the plant, one button each, the scan box, and the tanks |
+| — | **Load & ship** | New: one page in three parts — check & load, test & seal, ship — pre-filled, and resumable after a sign-out |
+| — | **Tank board** | New: pop the tank levels out onto a second monitor or a wall screen; live, read-only, no sign-in on that screen |
 | Blend (via `Blend_recipe_id`) | **Blend** | Recipes as data; pick the work order, the batch arrives scaled with tanks chosen, one button posts it whole |
 | — | Kiosk mode | New: PIN sign-in, touch layout and idle sign-out for a shared plant terminal |
 | — | Scan box | New: one box resolves an order, sample, BOL, tank, product or trailer |
 | — | **Support console** | New: health, data quality, alerts, scheduled jobs, audit trail, failures |
+
+## Easier than the system it replaces
+
+PIMS is one of the hardest things a new operator has to learn, and most of
+that is navigation: knowing which menu holds the job, which order to select,
+which tab comes next, and what to type into boxes the system could have
+filled. The operator screens are built to remove that, not to explain it.
+
+**One home screen.** An operator signs in to **Today**: three lists — *Trucks
+to load*, *Batches to blend*, *Trailers to ship* — with the late ones marked,
+one button on each row, and the tanks along the bottom. There is nothing to
+find. Scanning the paperwork in hand goes straight to that job (an order to its
+load, a work order to its blend, a staged trailer to a ship confirmation). On a
+kiosk the whole menu is two buttons: Today and Plant floor.
+
+**One page per job.** Load & ship reads down the page in the order the work
+happens on the dock — ① check & load, ② test & seal, ③ ship. A finished part
+shrinks to one ticked line and the page moves to the next. There are no tabs
+and no Skip buttons: anything left undone is listed on the Ship card as a
+warning, never a lock.
+
+**Nothing typed that the system knows.** Tank, product, trailer, quantity,
+date, BOL, sample number, last material hauled — filled in, with the reason
+beside each. What the operator types is what only they can know: the test
+readings and the answers about the trailer.
+
+| One truck, start to finish | Legacy PIMS | Now |
+|---|---|---|
+| Screens | 5 — Order Selection Menu, Load Trailer, Quality Control, QA Checklist, Ship Trailer | 2 — Today, Load & ship |
+| Finding the order | pick from a grid of every open order | it is on Today, or scan the paperwork |
+| Hand-typed values besides test readings | order, trailer, BOL, seals, sample #, weight | none required; seals and any wash ticket number |
+| Taps, sandbox walkthrough | — | 11 (4 trailer questions, save load, save QC, 1 sign-off answer, save sign-off, ship, done) |
+
+| Other jobs | Now |
+|---|---|
+| Ship a trailer already loaded | Today → **Ship** → **Yes** — two taps, no screen change |
+| Blend a batch | Today → **Blend** → **Blend N lbs** — two taps; the recipe, scaled quantity and tanks arrive chosen |
+| See the tanks | always on Today; **Pop out tanks** puts them on another screen |
+
+The legacy column is read from the screens compiled into `PIMS.exe` — the
+forms and the SQL behind them — not timed at a loadout rack. "Easier" is a
+claim to be tested with operators, not asserted; the runbook (§19) has a
+twenty-minute way to test it.
 
 ## What the system does on its own
 

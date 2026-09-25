@@ -156,6 +156,8 @@ through the same guard and preflight as the mirror.
 | Data quality, alerts, daily digest | Load & ship, Blend (hidden) |
 | The LIMS matrix with the FE-2026-001 filters | Standing orders, auto-close, GP sync (disabled) |
 | Product limits (the companion's own data) | Kiosk mode (hidden) |
+| Today — what is waiting, each job opening read-only | |
+| Tank board and **Pop out tanks** on another screen | |
 
 A refused action says where to make the change — "Make this change in the
 PIMS desktop application (Order Selection Menu → Load Trailer); it will appear

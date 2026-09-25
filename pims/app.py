@@ -26,8 +26,8 @@ from .errors import AuthError, PimsError
 from .integrations import gp_sync, lims_ingest
 from .integrations import scale as scale_integration
 from .services import (
-    alerts, blend, inquiry, inventory, jobs, lims, numbering, orders, prefill, qc,
-    query, reference, scan, specs,
+    alerts, blend, display, inquiry, inventory, jobs, lims, numbering, orders, prefill,
+    qc, query, reference, scan, specs,
 )
 from .util import utc_now
 
@@ -104,6 +104,7 @@ COMPANION_ALLOWED_WRITES = [
         r"^/api/specs$",
         r"^/api/materials/\d+/tests$",
         r"^/api/legacy/sync$",
+        r"^/api/display/(token|tokens/\d+/revoke)$",
     )
 ]
 
@@ -633,6 +634,50 @@ def set_tests(material_id: int, payload: dict = Body(...), user: dict = User) ->
         detail={"analytes": analytes},
     )
     return {"material_id": material_id, "analytes": analytes}
+
+
+# ----------------------------------------------------------------- displays
+
+
+@app.get("/api/display/tanks", tags=["display"])
+def display_tanks(
+    token: str = "",
+    plant_id: int | None = None,
+    authorization: str | None = Header(default=None),
+    x_pims_token: str | None = Header(default=None),
+) -> dict:
+    """Every tank at one plant, for the tank board.
+
+    A board on a wall screen runs on a display token (``?token=``) that can
+    read this and nothing else, so it keeps running when the operator who
+    opened it signs out. A signed-in user can also ask, for any plant they can see.
+    """
+
+    if token:
+        return display.tanks(display.plant_for_token(token))
+    user = current_user(authorization, x_pims_token)
+    if not plant_id:
+        raise PimsError("Say which plant.", fields={"plant_id": "Choose a plant."})
+    security.require_plant(user, plant_id)
+    return display.tanks(plant_id)
+
+
+@app.post("/api/display/token", tags=["display"], status_code=201)
+def display_token(payload: dict = Body(...), user: dict = User) -> dict:
+    """A link a tank board can run on without anyone signed in."""
+
+    return display.mint(int(payload["plant_id"]), user, payload.get("label", ""))
+
+
+@app.get("/api/display/tokens", tags=["display"])
+def display_tokens(plant_id: int | None = None, user: dict = User) -> list[dict]:
+    security.require_permission(user, "support.read")
+    return display.list_tokens(plant_id)
+
+
+@app.post("/api/display/tokens/{token_id}/revoke", tags=["display"])
+def revoke_display_token(token_id: int, user: dict = User) -> dict:
+    return display.revoke(token_id, user)
 
 
 # ----------------------------------------------------------------- blending

@@ -166,8 +166,23 @@ def test_prefill_uses_the_plant_default_receiving_location(conn, admin_user):
 
 
 def test_prefill_picks_the_tank_that_actually_holds_the_product(conn, admin_user, sales_order):
+    import uuid
+
     material = _material("05001", conn)
-    tank = _location("DM-T104", conn)
+    # A tank of this test's own, so the answer does not depend on what the
+    # seed happened to leave where.
+    tank = db.insert(
+        "location",
+        {
+            "number": f"DM-PF-{uuid.uuid4().hex[:6].upper()}",
+            "description": "Prefill test tank",
+            "location_type_id": db.scalar("SELECT location_type_id FROM location_type WHERE name = 'Tank'", (), conn),
+            "plant_id": 1,
+            "max_capacity": 250_000,
+            "active": 1,
+        },
+        conn,
+    )
     inventory.post(
         "RECEIVE",
         {"plant_id": 1, "to_location_id": tank, "to_material_id": material, "to_qty": 90_000},

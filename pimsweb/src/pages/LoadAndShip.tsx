@@ -1,10 +1,10 @@
-/* Load and ship, in one flow.
+/* Load and ship, on one page.
  *
  * The legacy client made a loadout operator visit four screens for one truck —
  * Plant floor, the order, the QC tab, the QA tab, then Ship — and hand-type the
  * order, trailer, BOL, seals, sample number and weight in the middle of it.
- * This is the same five things in sequence, with every value the system already
- * knows filled in and the reason shown next to it. */
+ * This is the same work down a single page, with every value the system
+ * already knows filled in and the reason shown next to it. */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useApp, useToast } from '../App'
@@ -30,18 +30,26 @@ interface ScaleReading {
   captured_at: string
 }
 
-/* The trailer inspection comes before the load, not after it. Four of the
- * checklist questions ask whether an *empty* trailer is clean, dry and
- * compatible with the product, and asking them once the product is aboard
- * makes them paperwork rather than a check.
+/* One page, three parts, top to bottom.
  *
- * It is the order of the steps, not a lock. An operator with a driver waiting
- * can post the load and answer afterwards; the load is then marked as having
- * been posted before the trailer check, which is a fact a supervisor can act
- * on. A screen that refuses to let someone do their job is a screen they route
- * around, and then nobody knows anything. */
-const STEPS = ['Order', 'Trailer', 'Load', 'Quality', 'Sign-off', 'Ship'] as const
-type Step = (typeof STEPS)[number]
+ * This used to be a strip of six tabs — Order, Trailer, Load, Quality,
+ * Sign-off, Ship — and before that four legacy screens. Six tabs is six
+ * places to be lost in, and each Skip button was a question the operator had
+ * to answer about the software rather than the truck. Now the job reads down
+ * the page in the order it happens on the dock:
+ *
+ *   1. Check & load  — the empty-trailer questions, then the load itself
+ *   2. Test & seal   — QC and the post-load sign-off
+ *   3. Ship          — this truck and its bill of lading
+ *
+ * A finished part shrinks to one line with a tick and the page moves to the
+ * next. Nothing is locked: the trailer check comes before the load because
+ * four of its questions are about an *empty* trailer, but an operator with a
+ * driver waiting can post the load anyway and the record says so; a truck can
+ * ship with QC still to enter and the Ship card says what is missing. A screen
+ * that refuses to let someone do their job is a screen they route around, and
+ * then nobody knows anything. */
+type Step = 'Order' | 'Trailer' | 'Load' | 'Quality' | 'Sign-off' | 'Ship'
 
 /* Where a flow in progress is kept.
  *
@@ -52,8 +60,9 @@ type Step = (typeof STEPS)[number]
  * operator came back to an empty screen and loaded the truck again. */
 const FLOW_KEY = 'pims.flow'
 
-interface FlowState {
+export interface FlowState {
   orderId: number | null
+  /** Kept so a flow saved by the old tabbed screen still resumes. */
   step: Step
   loadTxn: any
   qcRecord: any
@@ -74,7 +83,7 @@ const EMPTY_FLOW: FlowState = {
   startedAt: 0,
 }
 
-function readFlow(): FlowState | null {
+export function readFlow(): FlowState | null {
   try {
     const raw = sessionStorage.getItem(FLOW_KEY)
     if (!raw) return null
@@ -87,23 +96,27 @@ function readFlow(): FlowState | null {
   }
 }
 
+export function clearFlow() {
+  try { sessionStorage.removeItem(FLOW_KEY) } catch { /* nothing to clear */ }
+}
+
 export default function LoadAndShip({ initialOrderId }: { initialOrderId?: number }) {
   const { plantCode, navigate, can } = useApp()
-  const resumed = useMemo(() => (initialOrderId ? null : readFlow()), [initialOrderId])
+  // Opening a specific order resumes the saved flow only if it is that order:
+  // a truck half-loaded on another order must not be lost, nor mixed in.
+  const resumed = useMemo(() => {
+    const saved = readFlow()
+    if (!saved) return null
+    return !initialOrderId || saved.orderId === initialOrderId ? saved : null
+  }, [initialOrderId])
   const [flow, setFlow] = useState<FlowState>(
-    () => resumed ?? {
-      ...EMPTY_FLOW,
-      orderId: initialOrderId ?? null,
-      step: initialOrderId ? 'Trailer' : 'Order',
-      startedAt: Date.now(),
-    },
+    () => resumed ?? { ...EMPTY_FLOW, orderId: initialOrderId ?? null, startedAt: Date.now() },
   )
-  const [resumeNotice, setResumeNotice] = useState(Boolean(resumed))
-  const { orderId, step, loadTxn, qcRecord, preLoadDone, checklistDone, shipped } = flow
+  const [resumeNotice, setResumeNotice] = useState(Boolean(resumed?.loadTxn && !resumed?.shipped))
+  const { orderId, loadTxn, qcRecord, preLoadDone, checklistDone, shipped } = flow
 
   const patch = (values: Partial<FlowState>) =>
     setFlow((current) => ({ ...current, ...values }))
-  const setStep = (next: Step) => patch({ step: next })
 
   // Written on every change rather than on unmount: a kiosk sign-out unmounts
   // the whole tree without warning, and an unload handler does not always run.
@@ -121,131 +134,202 @@ export default function LoadAndShip({ initialOrderId }: { initialOrderId?: numbe
     [orderId, loadTxn?.transaction_id, qcRecord?.qc_id, shipped?.transaction_id],
   )
 
+  // Each part scrolls into view as the one before it finishes, so the next
+  // thing to do is always the thing in front of the operator.
+  const trailerRef = useRef<HTMLDivElement>(null)
+  const testRef = useRef<HTMLDivElement>(null)
+  const signRef = useRef<HTMLDivElement>(null)
+  const shipRef = useRef<HTMLDivElement>(null)
+  const goTo = (ref: React.RefObject<HTMLDivElement>) =>
+    window.setTimeout(() => ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60)
+
   function restart() {
-    try { sessionStorage.removeItem(FLOW_KEY) } catch { /* nothing to clear */ }
+    clearFlow()
     setResumeNotice(false)
     setFlow({ ...EMPTY_FLOW, startedAt: Date.now() })
   }
-
-  const done: Record<Step, boolean> = {
-    Order: Boolean(orderId),
-    Trailer: preLoadDone,
-    Load: Boolean(loadTxn),
-    Quality: Boolean(qcRecord),
-    'Sign-off': checklistDone,
-    Ship: Boolean(shipped),
+  // The shift's home is Today; a finished truck goes back there. A truck
+  // loaded but not shipped keeps its flow, so Today offers to carry on.
+  function backToToday() {
+    if (!loadTxn || shipped) clearFlow()
+    navigate('today')
   }
 
+  if (!orderId) {
+    return (
+      <>
+        <div className="page-head">
+          <div>
+            <h1>Load &amp; ship — {plantCode}</h1>
+            <div className="sub">Scan the paperwork for the truck in front of you, or pick its order.</div>
+          </div>
+          <div className="actions"><button onClick={() => navigate('today')}>Back to Today</button></div>
+        </div>
+        <PickOrder onPicked={(id) => patch({ orderId: id, startedAt: Date.now() })} />
+      </>
+    )
+  }
+
+  const missing = [
+    !preLoadDone && 'trailer check',
+    !qcRecord && can('qc.write') && 'QC',
+    !checklistDone && 'sign-off',
+  ].filter(Boolean) as string[]
+
   return (
-    <>
+    <div className="flow">
       <div className="page-head">
         <div>
           <h1>Load &amp; ship — {plantCode}</h1>
           <div className="sub">
             {order.data
               ? `Order ${order.data.order_id} · ${order.data.material_one_number} ${order.data.material_one_description} · ${order.data.customer_name ?? ''}`
-              : 'Pick the order going out, and work down the strip.'}
+              : `Order ${orderId}`}
           </div>
         </div>
         <div className="actions">
-          {orderId && <button onClick={() => navigate(`orders/${orderId}`)}>Open order</button>}
-          <button onClick={restart}>Start another</button>
+          <button onClick={backToToday}>Back to Today</button>
+          <button onClick={restart}>A different truck</button>
         </div>
       </div>
 
       {resumeNotice && (
         <div style={{ marginBottom: 14 }}>
-          <Alert
-            tone={loadTxn ? 'warn' : 'info'}
-            title={loadTxn ? 'You were part way through loading a truck' : 'Picking up where you left off'}
-          >
-            {loadTxn ? (
-              <>
-                Trailer <strong>{loadTxn.trailer_number || '—'}</strong> was loaded with{' '}
-                {fmtLbs(loadTxn.from_qty)} lbs on BOL <strong>{loadTxn.to_bol}</strong>
-                {shipped ? ' and has shipped.' : ' and has not shipped yet.'}{' '}
-                {shipped ? '' : 'Carry on from here rather than loading it again.'}
-              </>
-            ) : (
-              <>Order {orderId} was already selected.</>
-            )}
+          <Alert tone="warn" title="You were part way through loading this truck">
+            Trailer <strong>{loadTxn.trailer_number || '—'}</strong> was loaded with{' '}
+            {fmtLbs(loadTxn.from_qty)} lbs on BOL <strong>{loadTxn.to_bol}</strong> and has
+            not shipped yet. Carry on below rather than loading it again.
             <div className="row" style={{ gap: 8, marginTop: 10 }}>
-              <button className="sm" onClick={() => setResumeNotice(false)}>Carry on</button>
+              <button className="sm" onClick={() => { setResumeNotice(false); goTo(testRef) }}>Carry on</button>
               <button className="sm" onClick={restart}>Start a different truck</button>
             </div>
           </Alert>
         </div>
       )}
 
-      <div className="steps">
-        {STEPS.map((name, i) => (
-          <button
-            key={name}
-            className={`step${name === step ? ' active' : ''}${done[name] ? ' done' : ''}`}
-            disabled={!orderId && name !== 'Order'}
-            aria-current={name === step ? 'step' : undefined}
-            onClick={() => setStep(name)}
-          >
-            <span className="n" aria-hidden="true">{done[name] ? '✓' : i + 1}</span>
-            {name}
-            <span className="sr-only">{done[name] ? ' — done' : ''}</span>
-          </button>
-        ))}
-      </div>
-
-      {step === 'Order' && (
-        <PickOrder onPicked={(id) => patch({ orderId: id, step: 'Trailer', startedAt: Date.now() })} />
-      )}
-      {step === 'Trailer' && orderId && (
+      {/* ---------------------------------------------- 1. check and load */}
+      <FlowPart n={1} title="Check & load" done={Boolean(loadTxn)}
+        summary={loadTxn && (
+          <>
+            {fmtLbs(loadTxn.from_qty)} lbs of {loadTxn.from_material_number} from{' '}
+            {loadTxn.from_location_number} onto trailer {loadTxn.trailer_number || '—'} · BOL{' '}
+            <strong>{loadTxn.to_bol}</strong>
+            {!preLoadDone && <Badge tone="warn">loaded before the trailer check</Badge>}
+          </>
+        )}
+      >
+        <div ref={trailerRef} className="flow-anchor" />
         <ChecklistStep
           key="pre"
           stage="pre_load"
           orderId={orderId}
           trailerNumber={order.data?.trailer_number ?? ''}
           done={preLoadDone}
-          onDone={() => patch({ preLoadDone: true, step: 'Load' })}
-          onSkip={() => setStep('Load')}
+          onDone={() => patch({ preLoadDone: true })}
         />
-      )}
-      {step === 'Load' && orderId && (
         <LoadStep
           orderId={orderId}
           posted={loadTxn}
           preLoadDone={preLoadDone}
-          onCheckTrailer={() => setStep('Trailer')}
-          onPosted={(txn) => patch({ loadTxn: txn, step: 'Quality' })}
+          onCheckTrailer={() => goTo(trailerRef)}
+          onPosted={(txn) => { patch({ loadTxn: txn }); goTo(testRef) }}
         />
-      )}
-      {step === 'Quality' && orderId && (
+      </FlowPart>
+
+      {/* ------------------------------------------------ 2. test and seal */}
+      <div ref={testRef} className="flow-anchor" />
+      <FlowPart n={2} title="Test & seal" done={Boolean(loadTxn) && (Boolean(qcRecord) || !can('qc.write')) && checklistDone}
+        waiting={!loadTxn && 'Opens once the load is saved — the BOL and sample go on it.'}
+        summary={
+          <>
+            {qcRecord
+              ? <><SpecBadge status={qcRecord.spec_summary.status} /> sample {qcRecord.sample_number || '—'}</>
+              : 'QC entered by the lab'}
+            {' · '}signed off
+          </>
+        }
+      >
         <QualityStep
           orderId={orderId}
           saved={qcRecord}
           canWrite={can('qc.write')}
-          onSaved={(record) => patch({ qcRecord: record, step: 'Sign-off' })}
-          onSkip={() => setStep('Sign-off')}
+          onSaved={(record) => { patch({ qcRecord: record }); goTo(checklistDone ? shipRef : signRef) }}
         />
-      )}
-      {step === 'Sign-off' && orderId && (
+        <div ref={signRef} className="flow-anchor" />
         <ChecklistStep
           key="post"
           stage="post_load"
           orderId={orderId}
           trailerNumber={loadTxn?.trailer_number ?? order.data?.trailer_number ?? ''}
           done={checklistDone}
-          onDone={() => patch({ checklistDone: true, step: 'Ship' })}
-          onSkip={() => setStep('Ship')}
+          onDone={() => { patch({ checklistDone: true }); goTo(shipRef) }}
         />
-      )}
-      {step === 'Ship' && orderId && (
+      </FlowPart>
+
+      {/* ----------------------------------------------------------- 3. ship */}
+      <div ref={shipRef} className="flow-anchor" />
+      <FlowPart n={3} title="Ship" done={Boolean(shipped)}
+        waiting={!loadTxn && 'Opens once the load is saved.'}
+        summary={shipped && <>Shipped · transaction {shipped.transaction_id}</>}
+        keepOpen
+      >
+        {!shipped && missing.length > 0 && (
+          <div style={{ marginBottom: 12 }}>
+            <Alert tone="warn" title={`Still to do: ${missing.join(', ')}`}>
+              The truck can go — these can be finished afterwards, and the order will not
+              close until they are.
+            </Alert>
+          </div>
+        )}
         <ShipStep
           orderId={orderId}
           loadTxn={loadTxn}
           shipped={shipped}
           onShipped={(txn) => patch({ shipped: txn })}
-          onRestart={restart}
+          onRestart={() => { clearFlow(); navigate('today') }}
         />
-      )}
-    </>
+      </FlowPart>
+    </div>
+  )
+}
+
+/* One part of the page: open while it is the work, one ticked line once it
+ * is done (tap to look again), a greyed line while it is not reachable yet. */
+function FlowPart({
+  n, title, done, summary, waiting, keepOpen = false, children,
+}: {
+  n: number
+  title: string
+  done: boolean
+  summary?: React.ReactNode
+  waiting?: string | false
+  keepOpen?: boolean
+  children: React.ReactNode
+}) {
+  const [peek, setPeek] = useState(false)
+  if (waiting) {
+    return (
+      <section className="flow-part waiting" aria-disabled="true">
+        <header className="flow-part-head"><span className="flow-n">{n}</span><h2>{title}</h2>
+          <span className="flow-summary">{waiting}</span></header>
+      </section>
+    )
+  }
+  const open = !done || peek || keepOpen
+  return (
+    <section className={`flow-part${done ? ' done' : ''}`}>
+      <header className="flow-part-head">
+        <span className="flow-n" aria-hidden="true">{done ? '✓' : n}</span>
+        <h2>{title}<span className="sr-only">{done ? ' — done' : ''}</span></h2>
+        {done && <span className="flow-summary">{summary}</span>}
+        {done && !keepOpen && (
+          <button className="ghost sm" aria-expanded={peek} onClick={() => setPeek(!peek)}>
+            {peek ? 'Hide' : 'Show'}
+          </button>
+        )}
+      </header>
+      {open && <div className="flow-part-body">{children}</div>}
+    </section>
   )
 }
 
@@ -553,12 +637,11 @@ function LoadStep({
         {!preLoadDone && (
           <div style={{ marginTop: 12 }}>
             <Alert tone="warn" title="The trailer has not been checked yet">
-              The clean, dry and previous-load questions are about an empty trailer, so they
-              are worth answering before the product goes in. You can post the load anyway
-              and come back to them — the load will be marked as posted before the trailer
-              check.
+              The questions just above are about an empty trailer, so answer them before the
+              product goes in. You can save the load anyway — it will be marked as loaded
+              before the trailer check.
               <div className="row" style={{ gap: 8, marginTop: 10 }}>
-                <button className="sm primary" onClick={onCheckTrailer}>Check the trailer</button>
+                <button className="sm" onClick={onCheckTrailer}>Go to the trailer questions</button>
               </div>
             </Alert>
           </div>
@@ -656,7 +739,7 @@ function QualityStep({
   saved: any
   canWrite: boolean
   onSaved: (record: any) => void
-  onSkip: () => void
+  onSkip?: () => void
 }) {
   const toast = useToast()
   const [form, setForm] = useState<Record<string, any>>({})
@@ -708,8 +791,12 @@ function QualityStep({
   async function save() {
     setBusy(true); setError(null)
     try {
+      // A blank sample box is not a question to put to the operator: the
+      // number is assigned on save, the same way the BOL is on the load.
       const record = await api.post<any>(`/api/orders/${orderId}/qc`, {
-        ...form, acknowledge_warnings: acknowledged,
+        ...form,
+        acknowledge_warnings: acknowledged,
+        generate_sample_number: !String(form.sample_number ?? '').trim(),
       })
       toast.push('success', 'QC recorded', record.spec_summary.status.replace('_', ' '))
       onSaved(record)
@@ -731,11 +818,13 @@ function QualityStep({
     return (
       <Card title="Quality control">
         <Alert tone="info" title="Your role cannot record QC">
-          Carry on to the checklist; QC staff will enter results against this order.
+          Carry on to the sign-off below; QC staff will enter results against this order.
         </Alert>
-        <div className="row end" style={{ marginTop: 12 }}>
-          <button onClick={onSkip}>Skip to checklist</button>
-        </div>
+        {onSkip && (
+          <div className="row end" style={{ marginTop: 12 }}>
+            <button onClick={onSkip}>Skip to checklist</button>
+          </div>
+        )}
       </Card>
     )
   }
@@ -769,7 +858,7 @@ function QualityStep({
         <Field label="BOL number" hint="From the load you just posted">
           <input value={form.bol_number ?? ''} onChange={(e) => set({ bol_number: e.target.value })} />
         </Field>
-        <Field label="Sample #" className="span-2">
+        <Field label="Sample #" className="span-2" hint="Leave blank and one is assigned when you save">
           <div className="row" style={{ gap: 8, flexWrap: 'nowrap' }}>
             <input value={form.sample_number ?? ''} onChange={(e) => set({ sample_number: e.target.value })} />
             <button className="sm nowrap" onClick={generateSample}>Generate</button>
@@ -840,7 +929,7 @@ function QualityStep({
       )}
 
       <div className="step-actions">
-        <button onClick={onSkip}>Skip for now</button>
+        {onSkip && <button onClick={onSkip}>Skip for now</button>}
         <button
           className="primary"
           onClick={save}
@@ -880,7 +969,7 @@ function ChecklistStep({
   trailerNumber: string
   done: boolean
   onDone: () => void
-  onSkip: () => void
+  onSkip?: () => void
 }) {
   const { reference } = useApp()
   const toast = useToast()
@@ -906,15 +995,14 @@ function ChecklistStep({
   }
 
   if (done) {
-    return <Card title={copy.doneTitle}><Badge tone="ok">All questions answered</Badge></Card>
+    return (
+      <div className="flow-line"><Badge tone="ok">✓ {copy.doneTitle}</Badge>
+        <span className="muted small">all {questions.length} questions answered</span></div>
+    )
   }
   if (questions.length === 0) {
-    return (
-      <Card title={copy.title}>
-        <Alert tone="info" title="Nothing to answer">No questions are set up for this step.</Alert>
-        <div className="step-actions"><button className="primary" onClick={onDone}>Continue</button></div>
-      </Card>
-    )
+    // Nothing is set up to ask; that is not a step for the operator.
+    return null
   }
 
   return (
@@ -971,7 +1059,7 @@ function ChecklistStep({
         })}
       </div>
       <div className="step-actions">
-        <button onClick={onSkip}>{copy.skip}</button>
+        {onSkip && <button onClick={onSkip}>{copy.skip}</button>}
         <button className="primary" onClick={save} disabled={busy || answered < questions.length}>
           {copy.save}
         </button>
@@ -1165,7 +1253,7 @@ function ShipStep({
               </Alert>
             )}
             <div className="row end">
-              <button className="primary" onClick={onRestart}>Next truck</button>
+              <button className="primary" onClick={onRestart}>{shipped ? 'Done — back to Today' : 'Back to Today'}</button>
             </div>
           </div>
         )}

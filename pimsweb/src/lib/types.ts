@@ -246,3 +246,26 @@ export interface QueryResult {
   sql: string
   parameters: unknown[]
 }
+
+export interface TankTile {
+  location_id: number
+  number: string
+  description: string
+  kind: string
+  capacity: number | null
+  total: number
+  percent_full: number | null
+  room: number | null
+  /** normal | warn | high | over | low | empty | negative — colour means abnormal only. */
+  state: string
+  products: { number: string; description: string; lbs: number }[]
+  mixed: boolean
+  last_moved: string | null
+}
+
+export interface TankBoardData {
+  plant: { plant_id: number; code: string; name: string }
+  generated_at: string
+  tanks: TankTile[]
+  abnormal: number
+}

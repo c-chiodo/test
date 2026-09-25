@@ -701,10 +701,51 @@ def _seed_activity(conn, rng, material_ids, tanks_by_plant, user_ids) -> None:
             add(row["to_location_id"], row["to_material_id"], row["to_qty"])
         return txn_id
 
-    # Opening balances: each tank starts with one product.
+    def compatible(tank: int, material_id: int) -> bool:
+        """A tank takes more of what it already holds, or anything when empty.
+        Real tanks hold one product at a time; a seed that ignored that put
+        acid, water and soapstock in the same tank and made every tile on the
+        tank board read "mixed"."""
+
+        return all(
+            qty <= HEEL_LBS for (loc, mat), qty in balances.items()
+            if loc == tank and mat != material_id
+        )
+
+    def clear_heel(tank: int, material_id: int, base: dict) -> None:
+        """Before a tank takes a different product, the last of the old one is
+        written off — the heel. Plants do this at a product change; the seed
+        doing it too is what lets a tank be reused."""
+
+        for (loc, mat), qty in list(balances.items()):
+            if loc == tank and mat != material_id and qty > 0.01:
+                write(
+                    {
+                        **base,
+                        "transaction_type_id": 6,
+                        "from_material_id": mat,
+                        "from_location_id": tank,
+                        "from_qty": round(qty, 2),
+                        "remarks": "Heel written off before product change",
+                    }
+                )
+
+    # A tank this empty is ready for a new product once the heel is written off.
+    HEEL_LBS = 2_000.0
+    # Receipts stop here, the way an operator would.
+    FILL_LIMIT = 0.90
+
+    # Opening balances: one product per tank. The raw materials blending
+    # consumes get tanks of their own, one tank starts empty, and the rest
+    # hold finished product.
     for plant_id, tanks in tanks_by_plant.items():
-        for tank in tanks:
-            number = rng.choice(finished)
+        for index, tank in enumerate(tanks):
+            if index < len(inbound):
+                number = inbound[index]
+            elif index == len(inbound):
+                continue                       # an empty tank to receive into
+            else:
+                number = rng.choice(finished)
             when = (now - timedelta(days=95)).replace(microsecond=0).isoformat()
             write(
                 {
@@ -739,10 +780,16 @@ def _seed_activity(conn, rng, material_ids, tanks_by_plant, user_ids) -> None:
                     number = rng.choice(inbound)
                     material_id = material_ids[number]
                     qty = float(rng.randrange(20_000, 48_000, 500))
-                    candidates = [t for t in tanks if total_at(t) + qty <= tank_capacity]
+                    candidates = [
+                        t for t in tanks
+                        if total_at(t) + qty <= tank_capacity * FILL_LIMIT
+                        and compatible(t, material_id)
+                    ]
                     if not candidates:
                         continue
-                    tank = rng.choice(candidates)
+                    # Prefer the tank already holding this product.
+                    holding = [t for t in candidates if stock_at(t, material_id) > 1.0]
+                    tank = rng.choice(holding or candidates)
                 elif kind == 2:
                     # Work order: consume from a tank that holds enough.
                     sources = holdings(tanks, 8_000)
@@ -753,11 +800,14 @@ def _seed_activity(conn, rng, material_ids, tanks_by_plant, user_ids) -> None:
                     number = rng.choice(finished)
                     material_id = material_ids[number]
                     targets = [
-                        t for t in tanks if t != source and total_at(t) + qty <= tank_capacity
+                        t for t in tanks
+                        if t != source and total_at(t) + qty <= tank_capacity * FILL_LIMIT
+                        and compatible(t, material_id)
                     ]
                     if not targets:
                         continue
-                    tank = rng.choice(targets)
+                    holding = [t for t in targets if stock_at(t, material_id) > 1.0]
+                    tank = rng.choice(holding or targets)
                 else:
                     # Sales order: ship finished product a tank actually holds.
                     saleable = {material_ids[n] for n in finished}
@@ -813,6 +863,8 @@ def _seed_activity(conn, rng, material_ids, tanks_by_plant, user_ids) -> None:
                     "remarks": "",
                 }
 
+                if kind in (2, 3):
+                    clear_heel(tank, material_id, base)
                 if kind == 3:
                     write(
                         {

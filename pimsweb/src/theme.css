@@ -654,3 +654,206 @@ body.kiosk .scan-start label { font-size: 17px; }
   border-color: color-mix(in srgb, var(--warn) 30%, transparent);
 }
 .topbar button, .topbar label, .topbar .env-banner { white-space: nowrap; }
+
+/* ------------------------------------------------------------ tank board */
+
+/* Dark and quiet, for a second monitor or a wall screen. Every pairing below
+   is measured: text 6.7-16:1, gauge fills 5.5-9:1 against their track, state
+   labels 6.9-9:1. Colour marks abnormal states only, and always with a word. */
+body.board { background: #0d1117; color: #e8edf5; margin: 0; }
+.board-page { min-height: 100vh; display: flex; flex-direction: column; }
+.board-head {
+  display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
+  padding: 14px 22px; border-bottom: 1px solid #222c38; background: #11171f;
+}
+.board-title { font-size: 22px; letter-spacing: 0.01em; }
+.board-title strong { font-size: 26px; margin-right: 6px; }
+.board-spacer { flex: 1; }
+.board-alarm {
+  background: #9b2c24; color: #fff; font-weight: 700; font-size: 17px;
+  padding: 6px 14px; border-radius: 8px;
+}
+.board-fresh { font-size: 15px; color: #9aa6b8; }
+.board-fresh.stale {
+  background: #e0a95c; color: #0d1219; font-weight: 700; padding: 5px 12px; border-radius: 8px;
+}
+.board-clock { font-size: 26px; font-variant-numeric: tabular-nums; font-weight: 600; }
+.board-button {
+  background: #1f2935; color: #e8edf5; border: 1px solid #334155;
+  font-size: 15px; padding: 8px 14px; border-radius: 8px;
+}
+.board-button:hover { background: #283444; }
+.board-grid {
+  flex: 1; display: grid; gap: 16px; padding: 20px 22px;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); align-content: start;
+}
+.board-grid.is-stale .tile { opacity: 0.55; }
+.board-foot { padding: 10px 22px; color: #9aa6b8; font-size: 13px; border-top: 1px solid #222c38; }
+.board-empty { min-height: 100vh; display: grid; place-content: center; text-align: center; color: #e8edf5; }
+
+.tile {
+  background: #182029; border: 2px solid #232d3a; border-radius: 14px;
+  padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;
+}
+.tile-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tile-number { font-size: 26px; font-weight: 750; letter-spacing: 0.01em; }
+.tile-state {
+  font-size: 12px; font-weight: 800; letter-spacing: 0.06em;
+  padding: 3px 8px; border-radius: 6px; color: #0d1219; background: #9aa6b8;
+}
+.tile-body { display: flex; gap: 16px; align-items: stretch; }
+.gauge {
+  position: relative; width: 42px; height: 120px; flex: 0 0 auto;
+  background: #0b0f14; border: 1px solid #2c3847; border-radius: 8px; overflow: hidden;
+}
+.gauge-fill { position: absolute; left: 0; right: 0; bottom: 0; background: #7a8aa0; transition: height 0.6s ease; }
+.gauge-mark { position: absolute; left: 0; right: 0; border-top: 1px dashed #56657a; }
+.gauge-mark.m95 { bottom: 95%; }
+.gauge-mark.m85 { bottom: 85%; }
+.tile-figures { display: flex; flex-direction: column; justify-content: center; gap: 2px; min-width: 0; }
+.tile-pct { font-size: 44px; font-weight: 750; line-height: 1; font-variant-numeric: tabular-nums; }
+.tile-lbs { font-size: 18px; font-variant-numeric: tabular-nums; }
+.tile-room { font-size: 14px; color: #9aa6b8; }
+.tile-product { font-size: 15px; line-height: 1.3; min-height: 2.6em; }
+.tile-mixed { color: #e0a95c; font-weight: 700; }
+.tile-foot { font-size: 13px; color: #9aa6b8; }
+.muted-on-dark { color: #9aa6b8; }
+
+/* Abnormal states: the only colour on the board. */
+.tile.state-warn { border-color: #e0a95c; }
+.tile.state-warn .gauge-fill { background: #e0a95c; }
+.tile.state-warn .tile-state { background: #e0a95c; }
+.tile.state-high, .tile.state-over, .tile.state-negative { border-color: #f0796d; box-shadow: 0 0 0 3px rgba(240, 121, 109, 0.25); }
+.tile.state-high .gauge-fill, .tile.state-over .gauge-fill { background: #f0796d; }
+.tile.state-high .tile-state, .tile.state-over .tile-state, .tile.state-negative .tile-state { background: #f0796d; }
+.tile.state-low { border-color: #7fb0dd; }
+.tile.state-low .gauge-fill { background: #7fb0dd; }
+.tile.state-low .tile-state { background: #7fb0dd; }
+.tile.state-empty { border-style: dashed; }
+.tile.state-empty .tile-state { background: #2c3847; color: #e8edf5; }
+
+@media (prefers-reduced-motion: reduce) { .gauge-fill { transition: none; } }
+
+/* ----------------------------------------------------------------- today */
+
+/* The operator's one screen: three lanes of waiting jobs and the tanks.
+   Rows are big enough to hit with a gloved thumb; the lanes stack on a
+   narrow screen. */
+.today-scan { margin-bottom: 14px; }
+.lanes {
+  display: grid; gap: 14px; margin-bottom: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+.lane {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow);
+  display: flex; flex-direction: column; min-width: 0;
+}
+.lane-head {
+  display: flex; align-items: center; gap: 8px;
+  padding: 12px 14px; border-bottom: 1px solid var(--border);
+}
+.lane-head h2 { font-size: 16px; margin: 0; }
+.lane-count {
+  min-width: 26px; padding: 1px 8px; border-radius: 999px; text-align: center;
+  background: var(--brand-soft); color: var(--brand); font-weight: 700; font-size: 13px;
+}
+.lane-empty { padding: 22px 14px; color: var(--text-3); text-align: center; }
+.jobs { list-style: none; margin: 0; padding: 0; overflow-y: auto; max-height: 460px; }
+.job {
+  display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 10px;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+}
+.job:last-child { border-bottom: 0; }
+.job-main { display: flex; flex-direction: column; min-width: 0; }
+/* The customer is how an operator matches a job to the truck in front of
+   them, so it wraps to a second line rather than being cut off. */
+.job-main strong {
+  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  overflow-wrap: anywhere; line-height: 1.25;
+}
+.job-main span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.job-main span { color: var(--text-2); font-size: 13px; }
+.job-side { display: flex; flex-direction: column; align-items: flex-end; gap: 1px; }
+.job-qty { font-weight: 650; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.job-due { font-size: 12.5px; color: var(--text-2); white-space: nowrap; }
+.job-late { font-size: 12.5px; color: var(--warn); font-weight: 700; white-space: nowrap; }
+.job-go { min-width: 72px; }
+.job-more { padding: 10px 14px; color: var(--text-3); font-size: 13px; }
+body.kiosk .lane-head h2 { font-size: 18px; }
+body.kiosk .job { padding: 12px 14px; }
+body.kiosk .job-main span, body.kiosk .job-due, body.kiosk .job-late { font-size: 14.5px; }
+body.kiosk .job-go { min-width: 92px; min-height: 52px; }
+
+.tank-strip {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); padding: 12px 14px;
+}
+.tank-strip-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+.mini-tanks { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); }
+.mini-tank {
+  display: flex; gap: 10px; align-items: stretch; padding: 8px 10px;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2);
+}
+.mini-gauge {
+  position: relative; width: 16px; min-height: 64px; flex: none;
+  background: var(--surface-3); border: 1px solid var(--border-strong); border-radius: 3px; overflow: hidden;
+}
+.mini-gauge > div { position: absolute; left: 0; right: 0; bottom: 0; background: var(--text-3); }
+.mini-text { display: flex; flex-direction: column; min-width: 0; font-variant-numeric: tabular-nums; }
+.mini-text span { font-size: 13px; }
+.mini-product { color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-state { font-size: 11px !important; font-weight: 750; letter-spacing: 0.03em; }
+/* Colour for abnormal states only, and always beside the words. */
+.mini-tank.state-warn { border-color: var(--warn); }
+.mini-tank.state-warn .mini-gauge > div { background: var(--warn); }
+.mini-tank.state-warn .mini-state { color: var(--warn); }
+.mini-tank.state-high, .mini-tank.state-over, .mini-tank.state-negative { border-color: var(--danger); background: var(--danger-soft); }
+.mini-tank.state-high .mini-gauge > div, .mini-tank.state-over .mini-gauge > div { background: var(--danger); }
+.mini-tank.state-high .mini-state, .mini-tank.state-over .mini-state, .mini-tank.state-negative .mini-state { color: var(--danger); }
+.mini-tank.state-low { border-color: var(--info); }
+.mini-tank.state-low .mini-gauge > div { background: var(--info); }
+.mini-tank.state-low .mini-state { color: var(--info); }
+.mini-tank.state-empty { border-style: dashed; }
+
+/* A phone or a narrow tablet: the top bar wraps instead of pushing the page
+   sideways, and drops what the operator does not need to read. */
+@media (max-width: 700px) {
+  .topbar { height: auto; flex: 0 0 auto; flex-wrap: wrap; gap: 8px 10px; padding: 8px 12px; }
+  .topbar .spacer, .topbar .nowrap { display: none; }
+  .topbar .scan { order: 10; flex: 1 1 100%; min-width: 0; }
+  .topbar .scan input { min-width: 0; width: 100%; }
+  .topbar .scan .hintkey { display: none; }
+  .topbar select { max-width: 150px; }
+  .content { padding: 12px; }
+  .lanes { grid-template-columns: 1fr; }
+}
+
+/* -------------------------------------------------- load & ship, one page */
+
+/* Three numbered parts down the page. A finished part is one ticked line; a
+   part not reachable yet is a greyed line that says why. */
+.flow-part {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow); margin-bottom: 14px;
+}
+.flow-part-head { display: flex; align-items: center; gap: 12px; padding: 12px 16px; flex-wrap: wrap; }
+.flow-part-head h2 { font-size: 17px; margin: 0; }
+.flow-n {
+  width: 30px; height: 30px; flex: none; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--brand); color: var(--brand-ink); font-weight: 750;
+}
+.flow-part.done .flow-n { background: var(--ok); color: var(--on-accent); }
+.flow-part.waiting { box-shadow: none; background: var(--surface-2); }
+.flow-part.waiting .flow-n { background: var(--surface-3); color: var(--text-2); }
+.flow-part.waiting h2 { color: var(--text-2); }
+.flow-summary { color: var(--text-2); font-size: 14px; display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap; flex: 1 1 240px; }
+.flow-part.done .flow-summary { color: var(--text); }
+.flow-part-body { padding: 0 16px 16px; display: flex; flex-direction: column; gap: 14px; }
+.flow-part-body > .card { margin: 0; }
+.flow-anchor { scroll-margin-top: 12px; height: 0; }
+.flow-line { display: flex; align-items: center; gap: 10px; }
+body.kiosk .flow-part-head h2 { font-size: 20px; }
+body.kiosk .flow-n { width: 36px; height: 36px; font-size: 18px; }
+body.kiosk .flow-summary { font-size: 16px; }

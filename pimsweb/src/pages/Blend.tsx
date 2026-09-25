@@ -43,9 +43,9 @@ interface Plan {
   notes: string[]
 }
 
-export default function Blend() {
+export default function Blend({ initialOrderId }: { initialOrderId?: number }) {
   const { plantCode, navigate } = useApp()
-  const [orderId, setOrderId] = useState<number | null>(null)
+  const [orderId, setOrderId] = useState<number | null>(initialOrderId ?? null)
   const [batch, setBatch] = useState<any>(null)
 
   function restart() {
@@ -65,8 +65,8 @@ export default function Blend() {
           </div>
         </div>
         <div className="actions">
-          {orderId && <button onClick={() => navigate(`orders/${orderId}`)}>Open order</button>}
-          <button onClick={restart}>Start another</button>
+          <button onClick={() => navigate('today')}>Back to Today</button>
+          {orderId && <button onClick={restart}>A different batch</button>}
         </div>
       </div>
 

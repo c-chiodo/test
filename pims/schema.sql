@@ -571,3 +571,22 @@ CREATE TABLE IF NOT EXISTS legacy_watermark (
     max_id      INTEGER NOT NULL,
     PRIMARY KEY (table_key, recorded_at)
 );
+
+-- --------------------------------------------------------------- displays
+--
+-- A tank board on a second monitor or a wall screen must keep running after
+-- the operator who opened it signs out — kiosk terminals sign themselves out
+-- after three idle minutes. So a board runs on a token of its own, which can
+-- read one plant's tank levels and nothing else, expires, and can be revoked.
+
+CREATE TABLE IF NOT EXISTS display_token (
+    token_id    INTEGER PRIMARY KEY AUTOINCREMENT,
+    token_hash  TEXT NOT NULL UNIQUE,
+    plant_id    INTEGER NOT NULL REFERENCES plant(plant_id),
+    label       TEXT NOT NULL DEFAULT '',
+    created_by  TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    expires_at  TEXT NOT NULL,
+    last_seen   TEXT,
+    revoked     INTEGER NOT NULL DEFAULT 0
+);

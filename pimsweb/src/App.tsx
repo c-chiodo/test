@@ -14,6 +14,7 @@ import { ApiError, DEMO, api, setNoticeSink, token as tokenStore } from './lib/a
 import type { Reference, User } from './lib/types'
 import { ErrorBox, Loading, ToastProvider, useToast } from './components/ui'
 import ScanBox from './components/ScanBox'
+import PopOutTanks from './components/PopOutTanks'
 import Login from './pages/Login'
 import Kiosk, { kioskPlantId } from './pages/Kiosk'
 import Dashboard from './pages/Dashboard'
@@ -21,6 +22,8 @@ import Orders from './pages/Orders'
 import OrderDetail from './pages/OrderDetail'
 import LoadAndShip from './pages/LoadAndShip'
 import Blend from './pages/Blend'
+import Today from './pages/Today'
+import TankBoard from './pages/TankBoard'
 import Operations from './pages/Operations'
 import Inventory from './pages/Inventory'
 import Inquiry from './pages/Inquiry'
@@ -70,12 +73,15 @@ interface NavItem {
 
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Operations', items: [
+    // The operator's screen: every job waiting, one button each. The kiosk
+    // bar shows only Today and Plant floor — everything else opens from Today.
+    { route: 'today', label: 'Today', icon: '◉', kiosk: true },
     { route: 'dashboard', label: 'Dashboard', icon: '▤' },
-    { route: 'load-ship', label: 'Load & ship', icon: '⇢', kiosk: true, writes: true },
-    { route: 'blend', label: 'Blend', icon: '⚗', kiosk: true, writes: true },
-    { route: 'orders', label: 'Orders', icon: '▦', kiosk: true },
+    { route: 'load-ship', label: 'Load & ship', icon: '⇢', writes: true },
+    { route: 'blend', label: 'Blend', icon: '⚗', writes: true },
+    { route: 'orders', label: 'Orders', icon: '▦' },
     { route: 'operations', label: 'Plant floor', icon: '⚙', kiosk: true, writes: true },
-    { route: 'inventory', label: 'Inventory', icon: '⛁', kiosk: true },
+    { route: 'inventory', label: 'Inventory', icon: '⛁' },
   ]},
   { group: 'Analysis', items: [
     { route: 'inquiry', label: 'Inquiry', icon: '⌕' },
@@ -104,6 +110,15 @@ function useHashRoute(): [string[], (route: string) => void] {
 }
 
 export default function App() {
+  // The tank board is its own window: no sign-in screen, no navigation, just
+  // the tanks. It carries a display link that can read tank levels only.
+  if (window.location.hash.startsWith('#/board')) {
+    return (
+      <ToastProvider>
+        <TankBoard />
+      </ToastProvider>
+    )
+  }
   return (
     <ToastProvider>
       <Session />
@@ -133,7 +148,7 @@ function Session() {
     if (window.location.hash.replace(/^#\/?/, '').startsWith('kiosk')) {
       localStorage.setItem(KIOSK_KEY, '1')
       setKiosk(true)
-      window.location.hash = '#/load-ship'
+      window.location.hash = '#/today'
     }
   }, [])
 
@@ -168,10 +183,9 @@ function Session() {
         <Kiosk
           signedOutReason={signedOutReason}
           onSignedIn={(next) => {
-            // Every kiosk sign-in starts at Load & ship, not wherever the last
-            // person left the terminal. If a load is mid-flight, that is the
-            // screen the resume offer lives on anyway.
-            window.location.hash = '#/load-ship'
+            // Every kiosk sign-in starts at Today, not wherever the last person
+            // left the terminal. A load that was mid-flight is offered there.
+            window.location.hash = '#/today'
             setUser(next)
           }}
         />
@@ -184,7 +198,7 @@ function Session() {
       kiosk={kiosk}
       onSignOut={signOut}
       onExitKiosk={() => { localStorage.removeItem(KIOSK_KEY); setKiosk(false) }}
-      onEnterKiosk={() => { localStorage.setItem(KIOSK_KEY, '1'); setKiosk(true) }}
+      onEnterKiosk={() => { localStorage.setItem(KIOSK_KEY, '1'); setKiosk(true); window.location.hash = '#/today' }}
     />
   )
 }
@@ -298,7 +312,7 @@ function Shell({
     [user, reference, plantId, plantCode, setPlantId, health, navigate, can, logout, kiosk, companion],
   )
 
-  const page = route[0] || (kiosk ? 'load-ship' : 'dashboard')
+  const page = route[0] || (kiosk ? 'today' : 'dashboard')
   const isProduction = (health?.environment || '').toUpperCase() === 'PRODUCTION'
   const kioskItems = NAV.flatMap((section) => section.items).filter((item) => item.kiosk)
 
@@ -354,6 +368,11 @@ function Shell({
               </button>
             ))}
             {state && <ScanBox plantId={plantId} onNavigate={navigate} />}
+            {state && (
+              <AppContext.Provider value={state}>
+                <PopOutTanks />
+              </AppContext.Provider>
+            )}
             <span className={`timer${idleRemaining <= 30 ? ' soon' : ''}`}>
               signs out in {Math.floor(idleRemaining / 60)}:{String(idleRemaining % 60).padStart(2, '0')}
             </span>
@@ -461,7 +480,9 @@ function Route({ path }: { path: string[] }) {
     case 'load-ship':
       return <LoadAndShip initialOrderId={param ? Number(param) : undefined} />
     case 'blend':
-      return <Blend />
+      return <Blend initialOrderId={param ? Number(param) : undefined} />
+    case 'today':
+      return <Today />
     case 'operations':
       return <Operations initialOperation={param} />
     case 'inventory':
@@ -481,6 +502,7 @@ function Route({ path }: { path: string[] }) {
 
 function titleFor(page: string): string {
   return {
+    today: 'Today',
     dashboard: 'Dashboard',
     orders: 'Orders',
     'load-ship': 'Load & ship',

@@ -1337,6 +1337,64 @@ function companionPermissions(permissions: string[]): string[] {
   return held.filter((p) => !COMPANION_BLOCKED.has(p)).sort()
 }
 
+/* ----------------------------------------------------------- tank board */
+
+const TANK_TYPES = new Set(['Tank', 'Blend'])
+
+function tankState(total: number, capacity: number | null): string {
+  if (total < -0.5) return 'negative'
+  if (!capacity) return total > 0.5 ? 'normal' : 'empty'
+  const pct = (total / capacity) * 100
+  if (pct > 100.01) return 'over'
+  if (pct >= 95) return 'high'
+  if (pct >= 85) return 'warn'
+  if (total <= 0.5) return 'empty'
+  if (pct < 5) return 'low'
+  return 'normal'
+}
+
+/** The same tiles as pims/services/display.py, from the sandbox's store. */
+export function tankBoard(plantId: number): Row {
+  const plant = byId.plant().get(plantId)
+  if (!plant) return notFound(`Plant ${plantId} was not found.`)
+  const types = new Map(store.location_type.map((t) => [t.location_type_id, t.name]))
+  const rows = balances({ plant_id: plantId, location_id: null, material_id: null, as_of: null, include_zero: false })
+  const lastMoved = new Map<number, string>()
+  for (const t of store.inventory_transaction) {
+    for (const loc of [t.from_location_id, t.to_location_id]) {
+      if (loc && (!lastMoved.has(loc) || lastMoved.get(loc)! < t.transaction_date)) lastMoved.set(loc, t.transaction_date)
+    }
+  }
+  const tanks = store.location
+    .filter((l) => l.plant_id === plantId && l.active && TANK_TYPES.has(types.get(l.location_type_id)))
+    .sort((a, b) => String(a.number).localeCompare(String(b.number)))
+    .map((l) => {
+      const held = rows.filter((r: Row) => r.location_id === l.location_id).sort((a: Row, b: Row) => b.balance - a.balance)
+      const total = Math.round(held.reduce((sum: number, r: Row) => sum + r.balance, 0) * 100) / 100
+      const capacity = l.max_capacity ?? null
+      return {
+        location_id: l.location_id,
+        number: l.number,
+        description: l.description,
+        kind: types.get(l.location_type_id),
+        capacity,
+        total,
+        percent_full: capacity ? Math.round((total / capacity) * 1000) / 10 : null,
+        room: capacity ? Math.round((capacity - total) * 100) / 100 : null,
+        state: tankState(total, capacity),
+        products: held.map((r: Row) => ({ number: r.material_number, description: r.material_description, lbs: r.balance })),
+        mixed: held.filter((r: Row) => r.balance > 0.5).length > 1,
+        last_moved: lastMoved.get(l.location_id) ?? null,
+      }
+    })
+  return {
+    plant: { plant_id: plant.plant_id, code: plant.code, name: plant.name },
+    generated_at: nowIso(),
+    tanks,
+    abnormal: tanks.filter((t) => ['over', 'high', 'negative'].includes(t.state)).length,
+  }
+}
+
 /* -------------------------------------------------------------- blending */
 
 function recipeComponents(recipeId: number): Row[] {
@@ -2755,6 +2813,18 @@ async function route(method: string, path: string, body: Row): Promise<any> {
   }
   if ((m = match(path, '/api/transactions/:id/void')) && method === 'POST') {
     return voidTransaction(Number(m[0]), String(body.reason ?? ''))
+  }
+  if (method === 'POST' && match(path, '/api/display/token')) {
+    requireUser()
+    return { token: `sandbox-${Number(body.plant_id)}`, token_id: 1, plant_id: Number(body.plant_id), expires_at: null }
+  }
+  if (method === 'GET' && match(path, '/api/display/tokens')) {
+    requireUser()
+    return []      // the sandbox's pop-outs are windows of this tab, not links
+  }
+  if (method === 'GET' && match(path, '/api/display/tanks')) {
+    const fromToken = String(params.token ?? '').match(/^sandbox-(\d+)$/)
+    return tankBoard(fromToken ? Number(fromToken[1]) : Number(params.plant_id || 1))
   }
   if (method === 'GET' && match(path, '/api/balances')) {
     return balances({

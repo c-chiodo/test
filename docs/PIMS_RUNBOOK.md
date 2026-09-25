@@ -279,7 +279,7 @@ sign-in, only the operator screens, and an automatic sign-out after three
 minutes idle.
 
 1. Open PIMS on the terminal and go to `#/kiosk` (or press **Kiosk** in the top
-   bar). Pick the plant once — it is remembered on that device.
+   bar). The kiosk opens on **Today**, the operator's home screen. Pick the plant once — it is remembered on that device.
 2. Give each operator a PIN:
    ```python
    from pims import db, security
@@ -306,7 +306,8 @@ The terminal signs itself out after three idle minutes. If that happens between
 posting a load and shipping it, the load is already real: product has left the
 tank, a BOL number is minted and the trailer is staged. Signing back in and
 opening **Load & ship** offers to resume, naming the trailer, the weight and the
-BOL. Nothing needs to be re-entered, and the truck must not be loaded again.
+BOL. **Today** shows the same offer at the top of the screen. Nothing needs to
+be re-entered, and the truck must not be loaded again.
 
 If the operator instead starts a new flow, the staged trailer is still on the
 ship list, marked with who loaded it — and `health.data_quality` reports
@@ -369,3 +370,43 @@ Full detail, including exactly why it cannot affect production:
 | A number in PIMS is not in the companion yet | Recent rows arrive at the next 15-minute sync; edits to rows older than the window (14 days, 180 for orders) and deletions arrive at the weekly `--full`. |
 | Someone asks the companion to record a load | It cannot, by design; the refusal names the legacy screen to use. |
 | "Tote Fill" (or similar) under unclassified transaction types | A legacy type the mirror could not classify by name. It still counts toward balances; add the word to `TYPE_WORDS` in `pims/legacy/mirror.py` if it belongs to a known kind. |
+
+## 19. Tank boards and operator screens
+
+### Putting the tanks on another screen
+
+**Pop out tanks** (on Today, Inventory and the dashboard) opens the tank board
+in its own window: drag it to the second monitor and press **Full screen**. For
+a wall screen or a PC nobody signs in to, press **Link for another screen** and
+open that link on it.
+
+- The board shows one plant's tank levels and nothing else — no orders, no
+  customers — and cannot change anything.
+- The link carries a display key, not a sign-in. It lasts 90 days; only a hash
+  of it is stored.
+- It refreshes every 30 seconds. If it cannot reach the server for 90 seconds
+  the tiles dim and the header says how old the numbers are — a board that
+  looks live but is not is worse than a blank one.
+- Colour means abnormal only (nearly full, over capacity, nearly empty,
+  negative), always with the word beside it.
+
+**Support console → Tank boards** lists every link: plant, who made it, when
+it was last seen. **Switch off** kills one immediately — do it when a screen is
+retired or a link has been shared somewhere it should not be.
+
+### Testing that it is easier
+
+"Easier than the old PIMS" is the requirement, so measure it. Twenty minutes,
+two or three operators who have not seen the new screens, the sandbox or the
+test environment:
+
+1. Sign them in to the kiosk. Say only: *"Load the truck for KSX, test it and
+   send it."* Do not point at anything.
+2. Then: *"Trailer 320 is loaded — ship it."* Then: *"Blend the next batch."*
+3. Note for each task: time taken, every hesitation longer than about five
+   seconds and where it happened, and anything they asked.
+4. Ask a long-serving operator to do the first task in the legacy client, and
+   note the same.
+
+Every hesitation is a defect in the screen, not the operator. Record them in
+`PIMS_DEFECTS.md` like any other defect.

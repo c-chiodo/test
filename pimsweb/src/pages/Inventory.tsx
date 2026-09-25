@@ -5,6 +5,7 @@ import type { Balance } from '../lib/types'
 import {
   Card, DataTable, ErrorBox, Field, Loading, Meter, Stat, fmtLbs, useAsync,
 } from '../components/ui'
+import PopOutTanks from '../components/PopOutTanks'
 
 export default function Inventory() {
   const { plantId, plantCode, reference } = useApp()
@@ -43,6 +44,7 @@ export default function Inventory() {
             {asOf ? ` As of ${asOf}.` : ''}
           </div>
         </div>
+        <div className="actions"><PopOutTanks className="" /></div>
       </div>
 
       <div className="grid cols-4" style={{ marginBottom: 16 }}>
