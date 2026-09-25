@@ -46,6 +46,7 @@ def recipes(conn=None, include_inactive: bool = False) -> list[dict]:
     sql = """
         SELECT r.recipe_id, r.material_id, r.name, r.notes, r.active,
                r.department_id, r.yield_pct, r.vessel_type, r.method,
+               r.process_material_id, r.expected_tfa,
                d.code AS department_code, d.description AS department,
                m.number AS material_number, m.description AS material_description
         FROM blend_recipe r
@@ -54,16 +55,17 @@ def recipes(conn=None, include_inactive: bool = False) -> list[dict]:
     """
     if not include_inactive:
         sql += " WHERE r.active = 1"
-    rows = db.query(sql + " ORDER BY m.number", (), conn)
+    rows = db.query(sql + " ORDER BY m.number, r.vessel_type", (), conn)
     for row in rows:
         row["components"] = _components(row["recipe_id"], conn)
+        row["outputs"] = _outputs(row["recipe_id"], conn)
     return rows
 
 
 def _components(recipe_id: int, conn) -> list[dict]:
     return db.query(
         """
-        SELECT c.component_id, c.material_id, c.percentage, c.sort_order,
+        SELECT c.component_id, c.material_id, c.percentage, c.sort_order, c.grp,
                m.number AS material_number, m.description AS material_description
         FROM blend_recipe_component c
         JOIN material m ON m.material_id = c.material_id
@@ -75,14 +77,40 @@ def _components(recipe_id: int, conn) -> list[dict]:
     )
 
 
-def recipe_for_material(material_id: int, conn=None) -> dict | None:
-    row = db.query_one(
-        "SELECT * FROM blend_recipe WHERE material_id = ? AND active = 1",
-        (material_id,),
+def _outputs(recipe_id: int, conn) -> list[dict]:
+    return db.query(
+        """
+        SELECT o.output_id, o.material_id, o.role, o.label, o.readings, o.sort_order,
+               m.number AS material_number, m.description AS material_description
+        FROM blend_recipe_output o
+        JOIN material m ON m.material_id = o.material_id
+        WHERE o.recipe_id = ?
+        ORDER BY o.sort_order, o.output_id
+        """,
+        (recipe_id,),
         conn,
     )
+
+
+def recipe_for_material(
+    material_id: int, conn=None, *, method: str | None = None, recipe_id: int | None = None,
+) -> dict | None:
+    """The active recipe for a product. A product can have one per kind of
+    vessel; ``method`` picks blend or staged, and a work order that names its
+    recipe gets that one. With neither, a blend recipe comes first."""
+
+    if recipe_id:
+        row = db.query_one("SELECT * FROM blend_recipe WHERE recipe_id = ?", (recipe_id,), conn)
+    else:
+        sql = "SELECT * FROM blend_recipe WHERE material_id = ? AND active = 1"
+        params: list[Any] = [material_id]
+        if method:
+            sql += " AND method = ?"
+            params.append(method)
+        row = db.query_one(sql + " ORDER BY method = 'blend' DESC, recipe_id LIMIT 1", params, conn)
     if row:
         row["components"] = _components(row["recipe_id"], conn)
+        row["outputs"] = _outputs(row["recipe_id"], conn)
     return row
 
 
@@ -98,6 +126,9 @@ def set_recipe(
     yield_pct: float = 100.0,
     vessel_type: str = "Blend",
     method: str = "blend",
+    outputs: list[dict] | None = None,
+    process_material_id: int | None = None,
+    expected_tfa: float | None = None,
 ) -> dict:
     """Create or replace the recipe for a product.
 
@@ -112,11 +143,20 @@ def set_recipe(
             "A recipe needs at least one component.",
             fields={"components": "Add the materials this product is made from."},
         )
+    staged = (method or "blend").strip().lower() == "staged"
     total = sum(float(c.get("percentage") or 0) for c in components)
-    if abs(total - 100.0) > 0.01:
+    if not staged and abs(total - 100.0) > 0.01:
         raise ValidationError(
             f"Component percentages add up to {total:g}, not 100.",
             fields={"components": "Percentages by weight must sum to 100."},
+        )
+    if staged and abs(float(components[0].get("percentage") or 0) - 100.0) > 0.01:
+        # A staged recipe is written per 100 lbs of its lead ingredient —
+        # "5.1 lbs of acid per 100 lbs of soap" — because the soap is what is
+        # measured going in, and the rest is dosed against it.
+        raise ValidationError(
+            "A staged recipe is per 100 lbs of its first ingredient: that one is 100.",
+            fields={"components": "Set the first ingredient to 100."},
         )
     yield_pct = float(yield_pct if yield_pct not in (None, "") else 100.0)
     if not 0 < yield_pct <= 100:
@@ -144,6 +184,7 @@ def set_recipe(
                 "A component appears twice.",
                 fields={"components": "List each material once."},
             )
+        # Alternatives within a group share the group's percentage.
         if float(component.get("percentage") or 0) <= 0:
             raise ValidationError(
                 "Every component needs a percentage above zero.",
@@ -153,8 +194,8 @@ def set_recipe(
 
     with db.transaction(conn):
         db.execute(
-            "UPDATE blend_recipe SET active = 0 WHERE material_id = ? AND active = 1",
-            (material_id,),
+            "UPDATE blend_recipe SET active = 0 WHERE material_id = ? AND vessel_type = ? AND active = 1",
+            (material_id, vessel_type),
             conn,
         )
         recipe_id = db.insert(
@@ -162,7 +203,7 @@ def set_recipe(
             {
                 "material_id": material_id, "name": name.strip(), "notes": notes, "active": 1,
                 "department_id": department_id, "yield_pct": yield_pct, "vessel_type": vessel_type,
-                "method": method,
+                "method": method, "process_material_id": process_material_id, "expected_tfa": expected_tfa,
             },
             conn,
         )
@@ -173,6 +214,20 @@ def set_recipe(
                     "recipe_id": recipe_id,
                     "material_id": int(component["material_id"]),
                     "percentage": float(component["percentage"]),
+                    "sort_order": index * 10,
+                    "grp": component.get("grp") or None,
+                },
+                conn,
+            )
+        for index, output in enumerate(outputs or []):
+            db.insert(
+                "blend_recipe_output",
+                {
+                    "recipe_id": recipe_id,
+                    "material_id": int(output["material_id"]),
+                    "role": output.get("role") or f"output{index + 1}",
+                    "label": output.get("label") or output.get("role") or "Output",
+                    "readings": output.get("readings") or "",
                     "sort_order": index * 10,
                 },
                 conn,
@@ -189,7 +244,7 @@ def set_recipe(
             },
             conn=conn,
         )
-    result = recipe_for_material(material_id, conn)
+    result = recipe_for_material(material_id, conn, recipe_id=recipe_id)
     assert result is not None
     return result
 

@@ -54,15 +54,14 @@ def test_acid_is_a_department_only_where_the_soapstock_is(conn, acid):
     assert "ACID" not in {d["code"] for d in departments.for_plant(3, conn)}
 
 
-def test_the_acid_recipe_charges_more_than_it_makes(conn, acid_order):
-    plan = blend.plan(order_id=acid_order["order_id"], conn=conn)
-    assert plan["yield_pct"] == 80.0
-    assert plan["recipe"]["vessel_type"] == "Acid"
-    assert plan["to_location_number"] == "DM-ACID-1"
-    assert plan["charge"] == pytest.approx(plan["quantity"] / 0.8, abs=0.01)
-    assert sum(c["required"] for c in plan["components"]) == pytest.approx(plan["charge"], abs=0.05)
-    assert any("80% yield" in note for note in plan["notes"])
-    assert not plan["short"]
+def test_the_settle_recipe_carries_the_yields_workbook_ratios(conn):
+    settle = next(r for r in blend.recipes(conn) if r["vessel_type"] == "Settle" and r["material_number"] == "01019")
+    assert settle["method"] == "staged" and settle["expected_tfa"] == 26.0
+    soap = [c for c in settle["components"] if c["grp"] == "soap"]
+    assert {c["material_number"] for c in soap} == {"00007", "00006", "00010", "00009"}
+    per_100 = {c["material_number"]: c["percentage"] for c in settle["components"] if not c["grp"]}
+    assert per_100 == {"00001": 5.1, "00004": 2.6}          # acid, steam per 100 lbs soap
+    assert [o["role"] for o in settle["outputs"]] == ["oil", "mgr", "water"]
 
 
 def test_an_acid_order_is_not_blended_in_one_go(conn, acid_order, admin_user):
@@ -86,7 +85,7 @@ def test_an_acid_order_is_not_blended_in_one_go(conn, acid_order, admin_user):
 
 def test_a_blend_with_a_yield_refuses_components_that_do_not_add_up(conn, admin_user):
     product = _id("SELECT material_id FROM material WHERE number = '05003'", (), conn)
-    soap = _id("SELECT material_id FROM material WHERE number = '02005'", (), conn)
+    soap = _id("SELECT material_id FROM material WHERE number = '00007'", (), conn)
     blend.set_recipe(product, "Test yield", [{"material_id": soap, "percentage": 100}], admin_user,
                      conn=conn, yield_pct=90)
     try:
@@ -107,9 +106,9 @@ def test_a_blend_with_a_yield_refuses_components_that_do_not_add_up(conn, admin_
 
 @pytest.mark.parametrize("bad", [0, -5, 101])
 def test_an_impossible_yield_is_refused(conn, admin_user, bad):
-    material = _id("SELECT material_id FROM material WHERE number = '02001'", (), conn)
+    material = _id("SELECT material_id FROM material WHERE number = '01019'", (), conn)
     parts = [
-        {"material_id": _id("SELECT material_id FROM material WHERE number = '02005'", (), conn),
+        {"material_id": _id("SELECT material_id FROM material WHERE number = '00007'", (), conn),
          "percentage": 100},
     ]
     with pytest.raises(ValidationError):
@@ -128,7 +127,7 @@ def test_a_blend_is_unchanged_by_all_this(conn):
 def test_the_acid_tanks_are_the_ones_holding_what_acid_handles(conn, acid):
     board = display.tanks(1, conn, department_id=acid)
     numbers = {t["number"] for t in board["tanks"]}
-    assert "DM-ACID-1" in numbers
+    assert {"DM-1", "DM-13", "DM-103"} <= numbers        # settle, MGR, acid tanks
     assert board["department"]["code"] == "ACID"
     handled = departments.materials(acid, 1, conn)
     everything = display.tanks(1, conn)
@@ -137,7 +136,7 @@ def test_the_acid_tanks_are_the_ones_holding_what_acid_handles(conn, acid):
             p["lbs"] > 0.5 and _id("SELECT material_id FROM material WHERE number = ?", (p["number"],), conn) in handled
             for p in tile["products"]
         )
-        if tile["kind"] == "Acid" or holds_acid_material:
+        if tile["kind"] in {"Settle", "MGR"} or holds_acid_material:
             assert tile["number"] in numbers
         else:
             assert tile["number"] not in numbers
@@ -153,7 +152,7 @@ def test_the_department_list_comes_through_the_api(client, admin_token):
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert board.status_code == 200
-    assert any(t["kind"] == "Acid" for t in board.json()["tanks"])
+    assert any(t["kind"] == "Settle" for t in board.json()["tanks"])
 
 
 def test_a_display_token_can_narrow_to_a_department_but_not_widen(conn, acid, client, admin_user):

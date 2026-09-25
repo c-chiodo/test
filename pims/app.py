@@ -750,6 +750,14 @@ def process_batches(plant_id: int, department_id: int | None = None, user: dict 
     return process.open_batches(plant_id, department_id)
 
 
+@app.get("/api/process/spur", tags=["process"])
+def process_spur(plant_id: int, user: dict = User) -> list[dict]:
+    """Deliveries received but not unloaded: the railcar on the spur."""
+
+    security.require_plant(user, plant_id)
+    return process.spur(plant_id)
+
+
 @app.post("/api/process/start", tags=["process"], status_code=201)
 def process_start(payload: dict = Body(...), user: dict = User) -> dict:
     return process.start(payload, user)

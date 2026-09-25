@@ -26,7 +26,7 @@ def stocked_components(conn, admin_user) -> dict[str, int]:
     """Fresh tanks holding the cattle-blend components, keyed by material number."""
 
     tanks: dict[str, int] = {}
-    for number, qty in (("02001", 80_000), ("00010", 120_000), ("00001", 10_000)):
+    for number, qty in (("01007", 80_000), ("01008", 120_000), ("00003", 10_000)):
         code = f"DM-BT-{uuid.uuid4().hex[:6].upper()}"
         tank = db.insert(
             "location",
@@ -107,10 +107,11 @@ def _payload_from(plan: dict, tanks: dict[str, int] | None = None, **extra) -> d
 def test_a_recipe_scales_to_the_orders_outstanding_quantity(conn, blend_order):
     plan = blend.plan(order_id=blend_order, conn=conn)
     assert plan["quantity"] == 10_000
-    assert [c["material_number"] for c in plan["components"]] == ["02001", "00010", "00001"]
-    assert plan["components"][0]["required"] == pytest.approx(4_000)   # 40%
-    assert plan["components"][1]["required"] == pytest.approx(5_800)   # 58%
-    assert plan["components"][2]["required"] == pytest.approx(200)     # 2%
+    # FE Cattle Blend 2.5: MGR veg, process water and caustic.
+    assert [c["material_number"] for c in plan["components"]] == ["01007", "01008", "00003"]
+    assert plan["components"][0]["required"] == pytest.approx(5_700)   # 57%
+    assert plan["components"][1]["required"] == pytest.approx(4_050)   # 40.5%
+    assert plan["components"][2]["required"] == pytest.approx(250)     # 2.5%
 
 
 def test_a_product_with_no_recipe_says_so(conn, admin_user):
@@ -138,8 +139,8 @@ def test_recipe_percentages_must_sum_to_one_hundred(conn, admin_user):
             _material_id("01031", conn),
             "Bad recipe",
             [
-                {"material_id": _material_id("02005", conn), "percentage": 60},
-                {"material_id": _material_id("00010", conn), "percentage": 60},
+                {"material_id": _material_id("01007", conn), "percentage": 60},
+                {"material_id": _material_id("01008", conn), "percentage": 60},
             ],
             admin_user,
             conn=conn,
@@ -153,8 +154,8 @@ def test_replacing_a_recipe_keeps_the_old_one_behind_its_batches(conn, admin_use
         material,
         "MGR veg - 2.5 (revised)",
         [
-            {"material_id": _material_id("02005", conn), "percentage": 40},
-            {"material_id": _material_id("00010", conn), "percentage": 58},
+            {"material_id": _material_id("01007", conn), "percentage": 40},
+            {"material_id": _material_id("01008", conn), "percentage": 58},
             {"material_id": _material_id("00001", conn), "percentage": 2},
         ],
         admin_user,
@@ -173,7 +174,7 @@ def test_editing_a_recipe_is_not_an_operator_action(conn, operator):
         blend.set_recipe(
             _material_id("01020", conn),
             "Nope",
-            [{"material_id": _material_id("00010", conn), "percentage": 100}],
+            [{"material_id": _material_id("01008", conn), "percentage": 100}],
             operator,
             conn=conn,
         )
@@ -201,7 +202,7 @@ def test_a_batch_consumes_every_component_and_produces_the_product(
         tank = stocked_components[component["material_number"]]
         remaining = inventory.balance_of(tank, component["material_id"], conn)
         assert remaining == pytest.approx(
-            {"02001": 80_000, "00010": 120_000, "00001": 10_000}[component["material_number"]]
+            {"01007": 80_000, "01008": 120_000, "00003": 10_000}[component["material_number"]]
             - component["required"]
         )
     assert orders.get(blend_order, conn)["qty_fulfilled"] == pytest.approx(10_000)
@@ -279,7 +280,7 @@ def test_voiding_a_batch_reverses_every_row_together(
     for component in plan["components"]:
         tank = stocked_components[component["material_number"]]
         assert inventory.balance_of(tank, component["material_id"], conn) == pytest.approx(
-            {"02001": 80_000, "00010": 120_000, "00001": 10_000}[component["material_number"]]
+            {"01007": 80_000, "01008": 120_000, "00003": 10_000}[component["material_number"]]
         )
 
 

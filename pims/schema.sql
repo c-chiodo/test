@@ -176,6 +176,10 @@ CREATE TABLE IF NOT EXISTS "order" (
     plant_id             INTEGER NOT NULL REFERENCES plant(plant_id),
     department_id        INTEGER REFERENCES department(department_id),
     blend_serial_number  TEXT NOT NULL DEFAULT '',
+    -- Which recipe a work order runs, when its product has more than one
+    -- (20-series oil off a soap settle, or off an MGR reprocess). The legacy
+    -- order had the same idea as Blend_recipe_id.
+    recipe_id            INTEGER,
     vendor_id            INTEGER REFERENCES vendor(vendor_id),
     customer_id          INTEGER REFERENCES customer(customer_id),
     material_one_id      INTEGER REFERENCES material(material_id),
@@ -481,19 +485,45 @@ CREATE TABLE IF NOT EXISTS blend_recipe (
     -- The location type the batch runs in: 'Blend' tank, 'Acid' reactor.
     vessel_type   TEXT NOT NULL DEFAULT 'Blend',
     -- 'blend': everything in and out at once. 'staged': charged, reacted and
-    -- settled over hours, then drawn off and measured (acidulation).
-    method        TEXT NOT NULL DEFAULT 'blend'
+    -- settled over hours, then broken and measured (acidulation).
+    method        TEXT NOT NULL DEFAULT 'blend',
+    -- Staged only. What the tank holds while the batch is in it — the
+    -- legacy "1006 Soap in Process-Veg" — so the ledger reads as the legacy
+    -- PIMS wrote it: ingredients PRODUCED into it, the break PRODUCED out.
+    process_material_id INTEGER REFERENCES material(material_id),
+    -- Staged only. Fatty acid in the lead ingredient, % (the yields sheet
+    -- assumes 26 for soap): the oil a batch could give, for first-pass yield.
+    expected_tfa  REAL
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS ux_recipe_material
-    ON blend_recipe (material_id) WHERE active = 1;
+-- One active recipe per product *per kind of vessel*: 20-series oil comes
+-- off a soap settle and off an MGR reprocess, by different recipes.
+CREATE UNIQUE INDEX IF NOT EXISTS ux_recipe_material_vessel
+    ON blend_recipe (material_id, vessel_type) WHERE active = 1;
+
+-- What a staged batch breaks into: oil off the top, MGR, water off the
+-- bottom — each measured into its own tank, with the readings that belong
+-- on it.
+CREATE TABLE IF NOT EXISTS blend_recipe_output (
+    output_id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    recipe_id   INTEGER NOT NULL REFERENCES blend_recipe(recipe_id),
+    material_id INTEGER NOT NULL REFERENCES material(material_id),
+    role        TEXT NOT NULL,              -- oil | mgr | water | ...
+    label       TEXT NOT NULL,
+    readings    TEXT NOT NULL DEFAULT '',   -- comma list: moisture,spintest
+    sort_order  INTEGER NOT NULL DEFAULT 0
+);
 
 CREATE TABLE IF NOT EXISTS blend_recipe_component (
     component_id INTEGER PRIMARY KEY AUTOINCREMENT,
     recipe_id    INTEGER NOT NULL REFERENCES blend_recipe(recipe_id),
     material_id  INTEGER NOT NULL REFERENCES material(material_id),
     percentage   REAL NOT NULL,
-    sort_order   INTEGER NOT NULL DEFAULT 0
+    sort_order   INTEGER NOT NULL DEFAULT 0,
+    -- Components sharing a group are interchangeable: Soap - Gum, Soap -
+    -- Degum, Wetgums and VOP wet are all "soap". For a staged recipe the
+    -- percentage is pounds per 100 lbs of the first group.
+    grp          TEXT
 );
 
 -- A reading taken on a movement — the moisture and S of oil drawn off a

@@ -76,7 +76,7 @@ def test_purchase_order_samples_carry_the_vendor_marker(conn, admin_user):
             "order_date": "2026-08-17",
             "due_date": "2026-08-18",
             "vendor_id": 1,
-            "material_one_id": _material("02001", conn),
+            "material_one_id": _material("00007", conn),
             "material_one_quantity": 5_000,
         },
         admin_user,

@@ -38,7 +38,7 @@ def _make_order(conn, admin_user, *, material_number: str, order_type_id: int) -
     return created[0]["order_id"]
 
 
-@pytest.mark.parametrize("material_number", ["02001", "00010", "01020"])
+@pytest.mark.parametrize("material_number", ["00007", "01008", "01020"])
 def test_purchase_order_does_not_demand_tests_the_product_never_runs(
     conn, admin_user, material_number
 ):
@@ -53,7 +53,7 @@ def test_purchase_order_does_not_demand_tests_the_product_never_runs(
     flagged = {w["analyte"] for w in result["warnings"]}
     assert "temp" not in flagged
     assert "spintest" not in flagged
-    if material_number in {"02001", "00010"}:
+    if material_number in {"00007", "01008"}:
         assert "moisture" not in flagged
 
 

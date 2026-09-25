@@ -43,7 +43,8 @@ def test_seeded_ledger_is_internally_consistent(conn):
 
     balances = inventory.location_balance(include_zero=False, conn=conn)
     assert balances, "the demo dataset should have inventory"
-    assert [b for b in balances if b["balance"] < -0.01] == []
+    # A utility (steam) is drawn on without stock; only real tanks count.
+    assert [b for b in balances if b["balance"] < -0.01 and b["location_type"] != "Utility"] == []
     over = [
         b for b in balances
         if b["max_capacity"] and b["balance"] > b["max_capacity"] + 0.01

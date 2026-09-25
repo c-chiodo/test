@@ -187,6 +187,9 @@ def data_quality(plant_id: int | None = None, conn=None) -> dict[str, Any]:
         row
         for row in _balances(conn)
         if row["balance"] < -0.01 and (not plant_id or row["plant_id"] == plant_id)
+        # Steam and city water come from a utility, not a tank: it has no
+        # stock to overdraw, and reads below zero by design.
+        and row.get("location_type") != "Utility"
     ]
     over_capacity = [
         row

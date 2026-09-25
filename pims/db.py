@@ -232,6 +232,10 @@ MIGRATIONS: list[tuple[str, str, str]] = [
         "kind",
         "ALTER TABLE transaction_type ADD COLUMN kind TEXT NOT NULL DEFAULT ''",
     ),
+    ("blend_recipe", "process_material_id", "ALTER TABLE blend_recipe ADD COLUMN process_material_id INTEGER"),
+    ("blend_recipe", "expected_tfa", "ALTER TABLE blend_recipe ADD COLUMN expected_tfa REAL"),
+    ("blend_recipe_component", "grp", "ALTER TABLE blend_recipe_component ADD COLUMN grp TEXT"),
+    ("order", "recipe_id", 'ALTER TABLE "order" ADD COLUMN recipe_id INTEGER'),
 ]
 
 #: Indexes that must exist alongside the migrated columns. ``CREATE INDEX IF
@@ -267,6 +271,13 @@ def apply_migrations(conn: sqlite3.Connection | None = None) -> list[str]:
     if "transaction_type" in existing:
         # A type made before kinds existed is its own kind.
         conn.execute("UPDATE transaction_type SET kind = code WHERE kind = ''")
+    if "blend_recipe" in existing:
+        # One active recipe per product became one per product and vessel.
+        conn.execute("DROP INDEX IF EXISTS ux_recipe_material")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_recipe_material_vessel"
+            " ON blend_recipe (material_id, vessel_type) WHERE active = 1"
+        )
     return applied
 
 

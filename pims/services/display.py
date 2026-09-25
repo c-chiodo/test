@@ -28,7 +28,7 @@ from . import departments as departments_service, inventory
 TOKEN_DAYS = 90
 
 #: Location types that are shown as tanks.
-TANK_TYPES = ("Tank", "Blend", "Acid")
+TANK_TYPES = ("Tank", "Blend", "Acid", "Settle", "MGR")
 
 HIGH_PERCENT = 95.0
 WARN_PERCENT = 85.0
