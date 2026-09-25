@@ -130,15 +130,19 @@ def materials(department_id: int, plant_id: int | None = None, conn=None) -> set
 def vessel_types(department_id: int, conn=None) -> set[str]:
     """The kinds of location this department's batches run in."""
 
-    return {
-        row["vessel_type"]
-        for row in db.query(
-            "SELECT DISTINCT vessel_type FROM blend_recipe"
-            " WHERE active = 1 AND department_id = ?",
-            (department_id,),
-            conn,
-        )
-    }
+    rows = db.query(
+        "SELECT DISTINCT vessel_type, method FROM blend_recipe WHERE active = 1 AND department_id = ?",
+        (department_id,),
+        conn,
+    )
+    types = {row["vessel_type"] for row in rows}
+    if any(row["method"] == "staged" for row in rows):
+        # A staged batch starts in one kind of tank and moves on through the
+        # others (reactor, settle tank, MGR tank).
+        from .process import VESSEL_TYPES
+
+        types |= set(VESSEL_TYPES)
+    return types
 
 
 def add(code: str, description: str, plant_codes: list[str], username: str = "cli", conn=None) -> dict:

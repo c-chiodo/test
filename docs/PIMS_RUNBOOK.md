@@ -433,47 +433,77 @@ python -m pims department add --code ACID --name Acid --plants DM,SC
 
 **How acidulation is recorded.** Soap arrives by truck or railcar (the receive
 screen asks which, and takes the trailer or car number); it can be left on the
-truck bay or the spur and charged later. A settle is a *staged* batch in a
-settle tank, recorded as it happens, in the same shape as the legacy ledger:
+truck bay or the spur and charged later. A settle is a *staged* batch, recorded
+as it happens, in the same shape as the legacy ledger. It starts in a reactor
+and moves on to a settle tank to break — every acid plant works this way,
+though each numbers its tanks differently:
 
 | Stage | On the screen | In the ledger |
 |---|---|---|
-| Soap going in | from a tank, the spur, or straight off a truck | PRODUCE soap → Soap in Process (01006) in the tank; off a truck, a RECEIVE onto the truck bay first |
-| Acid going in | acid and steam, pre-filled from the recipe per 100 lbs of soap | PRODUCE acid / steam → 01006; steam comes from a Utility location that may run negative |
-| Cooking & mixing | a clock | the time, on the batch |
-| Settling | a clock | the time, on the batch |
-| Broken | each output's tank, **measured** pounds and readings | PRODUCE 01006 → 20's oil, → MGR, → process water; moisture and spintest as readings |
+| Soap going in | from a tank, the spur, or straight off a truck | PRODUCE soap → Soap in Process (1006) in the reactor; off a truck, a RECEIVE onto the truck bay first |
+| Acid going in | acid and steam, pre-filled from the plant's recipe per 100 lbs of soap | PRODUCE acid / steam → 1006; steam comes from a Utility location that may run negative |
+| Cooking & mixing | a clock; **Move it to another tank…** | the time, on the batch |
+| Moved on | the next tank — a cooker, a settle tank | PRODUCE 1006 → 1006 into the next tank, the whole batch, tagged with it |
+| Settling | a clock; it can be moved again | the time, on the batch |
+| Broken | each output's tank, **measured** pounds and readings | PRODUCE 1006 → 20's oil, → MGR, → process water, out of the tank it ended up in; moisture and spintest as readings |
 
-A break that does not balance within 10% of what went in asks for
-confirmation; the page shows first-pass yield live (oil ÷ soap × TFA). A batch
-with product in cannot be cancelled — break it, or undo the charges. The batch
-and its clock live on the server (`process_batch`), so a batch settling across
-a shift change is picked up on any terminal; the tank's tile on Today and on
-the tank board says which stage it is at. Acid batches are numbered
-`A-#####`. MGR is reprocessed the same way in an MGR tank (the "MGR
-reprocess" recipe: MGR in; oil, MGR and water out).
+| Plant | Soap goes into | Moved on to | Breaks from | MGR reprocessed in |
+|---|---|---|---|---|
+| Des Moines | reactors 1–3, or 40 | — | settle tanks 4–10 | 13–17 |
+| Sioux City | reactors 110, 111 | cookers 1–3 | settle tanks 4–10 | 11–15 |
+| Pleasant Hill | reactors 110, 111 | — | settle tanks 1–7 | 11–13 |
 
-**The recipes.** The seeded ones are from the Des Moines yields workbook:
-acid 5.1 and steam 2.6 lbs per 100 lbs of soap, TFA 26%, expected FPY 55%
-(MGR reprocess 34%). Adjust them to each plant's practice with
-`PUT /api/blend/recipes/{material_id}` (`method: "staged"`,
+These are the locations each plant's June–August 2026 ledger uses, and the
+tanks the sandbox seeds. A batch keeps what was charged into it wherever it
+goes; a tank it has left is empty. A break that does not balance within 10% of
+what went in asks for confirmation; the page shows first-pass yield live (oil
+÷ soap × TFA). A batch with product in cannot be cancelled — break it, or undo
+the charges. The batch and its clock live on the server (`process_batch`), so
+a batch settling across a shift change is picked up on any terminal; the
+tank's tile on Today and on the tank board says which stage it is at. Acid
+batches are numbered `A-#####`. MGR is reprocessed the same way in an MGR tank
+(the "MGR reprocess" recipe: MGR in; oil, MGR and water out).
+
+A reactor is a location of type `Acid`, a settle tank `Settle`, an MGR tank
+`MGR`; a batch can move into any free one of the three.
+
+**The recipes are each plant's own.** Acid and steam per 100 lbs of soap and
+the expected first-pass yield are measured from each plant's PRODUCED rows,
+June–August 2026, reversals netted, TFA 26% assumed:
+
+| Plant | Acid | Steam | First-pass yield | Settle split oil / MGR / water |
+|---|---|---|---|---|
+| Des Moines | 5.2 | 2.4 | 68% | 15 / 26 / 59 |
+| Sioux City | 4.8 | 7.7 | 61% | 12 / 26 / 62 |
+| Pleasant Hill | 5.7 | 0.6 (it steams the MGR) | 53% | 12 / 30 / 59 |
+
+A recipe with a plant wins at that plant over one without. Adjust them with
+`PUT /api/blend/recipes/{material_id}` (`plant_id`, `method: "staged"`,
 `process_material_id`, `expected_tfa`, `yield_pct`, `vessel_type`, the
-components with the soap group, and the outputs). The CLI sets the simpler
-parts:
+components with the soap group, and the outputs), or the CLI, which keeps the
+process material, outputs, TFA and soap group of the recipe it replaces:
 
 ```sh
-python -m pims department recipe --code ACID --product 01019 \
-  --component 00007=100 --component 00001=5.1 --component 00004=2.6 \
-  --yield 55 --vessel Settle --staged
+python -m pims department recipe --code ACID --plant SC --product 01018 \
+  --component 00007=100 --component 00006=100 --component 00010=100 --component 00009=100 \
+  --component 00001=4.8 --component 00004=7.7 --yield 61 --vessel Acid --staged
 ```
-
-A settle tank is an ordinary location whose type is `Settle`; an MGR tank's is
-`MGR`. Add one per tank.
 
 ## 21. Blended loads, caustic to the pH
 
 A product with a blend recipe (FE Cattle Blend 2.5/3.5, MGR veg 2.5, HC3800
-XL) is not loaded from one tank: **Load & ship** shows each component with its
+XL) is not loaded from one tank. The plants blend the same product
+differently, so each has its own recipe, measured from its PROD-LOAD rows
+(June–August 2026, main components normalised to 100):
+
+| Product | Des Moines | Sioux City | Pleasant Hill |
+|---|---|---|---|
+| FE Cattle Blend 2.5 | MGR veg 67.6, MGR animal 28.8, water 1.5, caustic 2.1 | MGR veg 60.6, water 29.4, MGR animal 6.4, caustic 3.6 | (every-plant recipe) |
+| FE Cattle Blend 3.5 | MGR veg 68.2, MGR animal 17.8, water 10.8, caustic 3.2 | MGR veg 84.0, water 10.9, MGR animal 1.0, caustic 4.1 | (every-plant recipe) |
+| MGR veg 2.5 | MGR veg 97.6, caustic 2.4 | MGR veg 88.1, water 7.8, caustic 4.1 | MGR veg 82.8, water 14.7, caustic 2.5 |
+
+Set a plant's with `PUT /api/blend/recipes/{material_id}` and `plant_id`, or
+`python -m pims department recipe --plant SC …`. **Load & ship** shows each component with its
 tank and pounds, scaled to the truck, and the caustic as steps — add some,
 type the pH, add more. Nothing is posted until **Save load**; then the truck
 posts as PROD_LOAD rows (one per component, the legacy PROD-LOAD) under one
@@ -503,9 +533,9 @@ has its definitions on the page, and **Download CSV** gives its main table.
 | Spreadsheet exports | the PIMS QUERY / PIMS Report exports | The ledger in the legacy column layouts (see below) |
 
 **Definitions.** The materials are identified by their legacy numbers, as the
-workbooks filter them: soap 6, 7, 10; acid 1; steam 4; water 11 and 1008;
-Soap in Process 1006; MGR veg 1007; MGR animal 1003; 20's oil 1018 and 1019;
-caustic 3. A site that numbers differently overrides them with the
+workbooks filter them: soap 6, 7, 10; acid 1; steam 4; water in 11, 15 (rain
+water) and 1008; Soap in Process 1006; MGR veg 1007; MGR animal 1003; 20's oil
+1017 (PJ), 1018 (SC) and 1019 (DM); caustic 3. A site that numbers differently overrides them with the
 `reports.materials` setting, e.g.
 `{"soap": [6, 7, 10], "oil": [1019]}` (only the roles given change). Two
 deliberate differences from the workbook:
@@ -514,7 +544,12 @@ deliberate differences from the workbook:
   from Soap in Process, "MGRV oil" is oil made from MGR — the same thing as
   tanks 1–10 and 13–17 at Des Moines, and still true at a plant numbered
   differently. MGR going *into* an MGR tank is processing; MGR coming *out* to
-  another tank is break output.
+  another tank is break output. An MGR tank is one typed `MGR`, or — because
+  the plants name them differently — one MGR is regularly broken into oil
+  from, found from the rows themselves.
+- A legacy shipment correction (a SHIPADJ and a second SHIP-LEAVE under the
+  first, equal and opposite) nets to nothing, here and in order progress; the
+  second SHIP-LEAVE is not more product out.
 - A reversed posting and its reversal are left out of the yields (the order
   screens do the same). The caustic and reversal reports show them.
 

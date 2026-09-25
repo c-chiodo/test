@@ -5,9 +5,9 @@
 import { Row, byId, store } from './store'
 
 const MATERIALS: Record<string, number[]> = {
-  soap: [6, 7, 10], acid: [1], steam: [4], water_in: [11, 1008], process: [1006], mgr: [1007],
-  mgr_animal: [1003], oil: [1018, 1019], process_water: [1008], caustic: [3],
-  out_mgrv: [1007, 3019], out_mgra: [1003, 5003],
+  soap: [6, 7, 10], acid: [1], steam: [4], water_in: [11, 15, 1008], process: [1006], mgr: [1007],
+  mgr_animal: [1003], oil: [1017, 1018, 1019], process_water: [1008], caustic: [3],
+  out_mgrv: [1007, 3017, 3018, 3019], out_mgra: [1003, 5003],
 }
 const WATER_TRAILER_LBS = 46_000
 const LEGACY_TYPE_NAMES: Record<string, string> = {
@@ -63,6 +63,7 @@ function ledger(plantIds: number[], start: string, end: string, includeReversed 
   const departments = byId.department()
   const ltypes = new Map(store.location_type.map((t) => [t.location_type_id, t.name]))
   const ids = new Set(plantIds)
+  const txnById = new Map(store.inventory_transaction.map((t) => [t.transaction_id, t]))
   const out: Row[] = []
   for (const t of store.inventory_transaction) {
     if (!ids.has(t.plant_id)) continue
@@ -78,6 +79,8 @@ function ledger(plantIds: number[], start: string, end: string, includeReversed 
     const fl = locations.get(t.from_location_id), tl = locations.get(t.to_location_id)
     const tt = types.get(t.transaction_type_id) ?? {}
     const o = orders.get(t.order_id)
+    const parent = t.parent_transaction_id ? txnById.get(t.parent_transaction_id) : undefined
+    const parentType = parent ? types.get(parent.transaction_type_id) : undefined
     const v = o ? vendors.get(o.vendor_id) : undefined
     return {
       ...t, plant_code: plants.get(t.plant_id)?.code, type_code: tt.code, kind: tt.kind ?? tt.code, type_name: tt.description,
@@ -85,6 +88,7 @@ function ledger(plantIds: number[], start: string, end: string, includeReversed 
       from_location: fl?.number ?? null, from_location_type: fl ? ltypes.get(fl.location_type_id) : null,
       to_number: tm?.number ?? null, to_description: tm?.description ?? null,
       to_location: tl?.number ?? null, to_location_type: tl ? ltypes.get(tl.location_type_id) : null,
+      parent_kind: parentType ? parentType.kind ?? parentType.code : null,
       department_code: departments.get(t.department_id)?.code ?? null, user_name: users.get(t.user_id)?.full_name ?? null,
       order_reference: o?.order_reference ?? null, ship_method: o?.ship_method ?? null,
       gp_vendorid: v?.gp_vendorid ?? null, vendor_name: v?.name ?? null,
@@ -132,6 +136,21 @@ function acidYields(f: Row, user: Row): Row {
   }
   const T = (k: string) => totals[k] ?? 0
   const has = (set: string, n: number | null) => n !== null && m[set].has(n)
+  // Which tanks reprocess MGR: by type, or where MGR is regularly broken into oil.
+  const brokenFrom = new Map<number, Map<number, number>>()
+  for (const r of rows) {
+    if (r.kind === 'PRODUCE' && has('mgr', r.f) && has('oil', r.t) && r.from_location_id) {
+      const counts = brokenFrom.get(r.plant_id) ?? new Map<number, number>()
+      counts.set(r.from_location_id, (counts.get(r.from_location_id) ?? 0) + 1)
+      brokenFrom.set(r.plant_id, counts)
+    }
+  }
+  const vessels = new Set<number>()
+  for (const counts of brokenFrom.values()) {
+    const top = Math.max(...counts.values())
+    for (const [loc, n] of counts) if (n >= 0.2 * top) vessels.add(loc)
+  }
+  const mgrVessel = (id: number | null, type: string | null) => type === 'MGR' || (id !== null && vessels.has(id))
   for (const r of rows) {
     const { f: fn, t: tn, kind, day } = r
     if (kind === 'RECEIVE' && has('soap', tn)) add('soap_received', r.to_qty, day)
@@ -148,10 +167,10 @@ function acidYields(f: Row, user: Row): Row {
         else if (has('process_water', tn)) add('settle_water', r.to_qty, day)
       } else if (has('mgr', fn)) {
         if (has('oil', tn)) add('mgr_oil', r.to_qty, day)
-        else if (has('mgr', tn) && r.to_location_type !== 'MGR' && r.from_location_id !== r.to_location_id) add('mgr_mgr', r.to_qty, day)
+        else if (has('mgr', tn) && !mgrVessel(r.to_location_id, r.to_location_type) && r.from_location_id !== r.to_location_id) add('mgr_mgr', r.to_qty, day)
         else if (has('process_water', tn)) add('mgr_water', r.to_qty, day)
       } else if (has('mgr_animal', fn) && has('oil', tn)) add('mgra_oil', r.to_qty, day)
-      if (has('mgr', tn) && r.to_location_type === 'MGR' && r.from_location_type !== 'MGR') add('mgr_processed', r.to_qty, day)
+      if (has('mgr', tn) && mgrVessel(r.to_location_id, r.to_location_type) && !mgrVessel(r.from_location_id, r.from_location_type)) add('mgr_processed', r.to_qty, day)
       if (has('oil', tn)) add('total_oil', r.to_qty, day)
       if (has('oil', fn) && (has('mgr', tn) || has('mgr_animal', tn))) add('bottoms', r.to_qty, day)
     }
@@ -164,6 +183,7 @@ function acidYields(f: Row, user: Row): Row {
       else if (has('caustic', fn)) add('out_caustic', r.from_qty, day)
     }
     if (kind === 'SHIP' && has('process_water', fn)) add('water_shipped', r.from_qty, day)
+    if (kind === 'ADJUST' && r.parent_kind === 'SHIP' && has('process_water', fn)) add('water_shipped', r.from_qty, day)
   }
   const theoretical = T('soap_processed') * tfa / 100
   const netSoap = T('soap_processed') - T('reprocessed_water')

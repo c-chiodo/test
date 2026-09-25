@@ -209,3 +209,40 @@ def test_the_companion_runs_reports(pims_app):
     from pims import app as pims_app
     assert any(p.match("/api/reports/acid-yields") for p in pims_app.COMPANION_ALLOWED_WRITES)
     assert any(p.match("/api/reports/export/csv") for p in pims_app.COMPANION_ALLOWED_WRITES)
+
+
+def _type_id(code: str, conn) -> int:
+    return db.scalar("SELECT transaction_type_id FROM transaction_type WHERE code = ?", (code,), conn)
+
+
+def test_a_legacy_ship_correction_is_not_more_shipped(conn, admin_user, ledger):
+    """The legacy PIMS corrects a SHIP-LEAVE with a SHIPADJ and a second
+    SHIP-LEAVE under it, equal and opposite. Neither is more product out."""
+
+    from pims.services import orders
+
+    for name in ("w_load", "w_ship"):
+        db.update("inventory_transaction", {"transaction_id": ledger[name]}, {"order_id": 9_900_001}, conn)
+    base = {"plant_id": 1, "user_id": admin_user["user_id"], "order_id": 9_900_001,
+            "transaction_date": f"{DAY}T12:00:00+00:00", "user_date": DAY,
+            "parent_transaction_id": ledger["w_ship"], "from_material_id": _m("01008", conn),
+            "from_location_id": _l("DM-TRAILER", conn)}
+    db.insert("inventory_transaction", {**base, "transaction_type_id": _type_id("SHIP", conn), "from_qty": 2_998}, conn)
+    db.insert("inventory_transaction", {**base, "transaction_type_id": _type_id("ADJUST", conn), "from_qty": -2_998}, conn)
+    assert orders.progress(9_900_001, 1, conn)["qty_shipped"] == 10_000
+    assert reports.acid_yields(PERIOD, admin_user, conn)["outbound_water"]["lbs"] == 10_000
+
+
+def test_mgr_tanks_are_found_by_what_they_do(conn, admin_user, ledger):
+    """Plants name their MGR tanks differently; one not typed MGR is still
+    found as the tank MGR is broken into oil from."""
+
+    db.execute("UPDATE location SET location_type_id = 1 WHERE number = 'DM-13'", (), conn)
+    got = reports.acid_yields(PERIOD, admin_user, conn)
+    assert got["mgr_processed"] == 10_000
+    assert {p["part"]: p["lbs"] for p in got["mgr_break"]} == {"oil": 3_400, "mgr": 3_000, "water": 3_600}
+
+
+def test_pleasant_hill_oil_and_rain_water_count(conn, admin_user):
+    roles = reports.materials(conn)
+    assert 1017 in roles["oil"] and 15 in roles["water_in"]

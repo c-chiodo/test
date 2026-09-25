@@ -493,13 +493,18 @@ CREATE TABLE IF NOT EXISTS blend_recipe (
     process_material_id INTEGER REFERENCES material(material_id),
     -- Staged only. Fatty acid in the lead ingredient, % (the yields sheet
     -- assumes 26 for soap): the oil a batch could give, for first-pass yield.
-    expected_tfa  REAL
+    expected_tfa  REAL,
+    -- The plant it is for; NULL = every plant. Plants blend the same product
+    -- differently (FE Cattle Blend 2.5 is mostly MGR veg and MGR animal at
+    -- Des Moines, MGR veg and process water at Sioux City), and settle with
+    -- different acid and steam, so a plant's own recipe wins.
+    plant_id      INTEGER REFERENCES plant(plant_id)
 );
 
--- One active recipe per product *per kind of vessel*: 20-series oil comes
--- off a soap settle and off an MGR reprocess, by different recipes.
-CREATE UNIQUE INDEX IF NOT EXISTS ux_recipe_material_vessel
-    ON blend_recipe (material_id, vessel_type) WHERE active = 1;
+-- One active recipe per product, per kind of vessel, per plant: 20-series
+-- oil comes off a soap settle and off an MGR reprocess, by different
+-- recipes. The index is made in db.apply_migrations, after plant_id exists
+-- on a database older than it.
 
 -- What a staged batch breaks into: oil off the top, MGR, water off the
 -- bottom — each measured into its own tank, with the readings that belong

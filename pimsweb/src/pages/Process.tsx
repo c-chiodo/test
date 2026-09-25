@@ -77,7 +77,9 @@ export function ProcessOverview({ departmentId, orderId }: { departmentId: numbe
   const waiting = (work.data?.rows ?? [])
     .filter((o) => recipeOf(o) && o.material_one_quantity - o.qty_fulfilled > 0.5 && !running.has(o.order_id))
     .sort((a, b) => a.due_date.localeCompare(b.due_date))
+  // In the order a batch goes through them.
   const kinds = [...new Set((vessels.data ?? []).map((v) => v.vessel_type))]
+    .sort((a, b) => ['Acid', 'Settle', 'MGR'].indexOf(a) - ['Acid', 'Settle', 'MGR'].indexOf(b))
 
   async function start(order: Order, vesselId?: number) {
     setBusy(true); setError(null)
@@ -93,7 +95,7 @@ export function ProcessOverview({ departmentId, orderId }: { departmentId: numbe
       <div className="page-head">
         <div>
           <h1>{name} — {plantCode}</h1>
-          <div className="sub">The settle and MGR tanks and what is in each, what is waiting on the spur, and the work to start.</div>
+          <div className="sub">The reactors, settle and MGR tanks and what is in each, what is waiting on the spur, and the work to start.</div>
         </div>
         <div className="actions"><button onClick={() => navigate('today')}>Back to Today</button></div>
       </div>
@@ -105,7 +107,7 @@ export function ProcessOverview({ departmentId, orderId }: { departmentId: numbe
         </Alert>
       ) : kinds.map((kind) => (
         <section key={kind} className="task-group">
-          <h2>{kind === 'Settle' ? 'Settle tanks' : `${kind} tanks`}</h2>
+          <h2>{({ Acid: 'Reactors — soap and acid go in here', Settle: 'Settle tanks — moved here to settle and break', MGR: 'MGR tanks' } as Record<string, string>)[kind] ?? `${kind} tanks`}</h2>
           <div className="reactors">
             {(vessels.data ?? []).filter((v) => v.vessel_type === kind).map((v) => <Reactor key={v.location_id} vessel={v} />)}
           </div>
@@ -232,7 +234,9 @@ export function ProcessBatchPage({ batchId }: { batchId: string }) {
         <div>
           <h1>Batch {batch.batch_id} — {plantCode}</h1>
           <div className="sub">
-            {batch.recipe?.name} in {batch.vessel?.number} · work order {batch.order_id} for {fmtLbs(batch.target_lbs)} lbs {batch.product?.number} {batch.product?.description}
+            {batch.recipe?.name} in {batch.vessel?.number}
+            {batch.moves?.length ? <> (via {[batch.moves[0].from, ...batch.moves.slice(0, -1).map((m) => m.to)].join(' → ')})</> : null}
+            {' '}· work order {batch.order_id} for {fmtLbs(batch.target_lbs)} lbs {batch.product?.number} {batch.product?.description}
           </div>
         </div>
         <div className="actions">
@@ -256,7 +260,7 @@ export function ProcessBatchPage({ batchId }: { batchId: string }) {
       {error && <div style={{ marginBottom: 12 }}><ErrorBox error={error} /></div>}
 
       <FlowPart n={1} title={`${lead?.label ?? 'Soap'} in`} done={done('charging')}
-        summary={<>{fmtLbs(lead?.charged_lbs)} lbs of {lead?.label.toLowerCase()} in {batch.vessel?.number}{into}</>}>
+        summary={<>{fmtLbs(lead?.charged_lbs)} lbs of {lead?.label.toLowerCase()} into {batch.moves?.[0]?.from ?? batch.vessel?.number}{into}</>}>
         {lead && (
           <div className="guide-line">
             About <strong>{fmtLbs(lead.guide_lbs)} lbs</strong> {lead.basis}.
@@ -309,6 +313,7 @@ export function ProcessBatchPage({ batchId }: { batchId: string }) {
       <FlowPart n={3} title="Cook & mix" done={done('mixing')} waiting={waiting('mixing', 'Once the acid is in.')}
         summary={<>cooked {spanOf(batch, 2, 3)}</>}>
         <div className="big-clock">Cooking for {clock(minutes)}</div>
+        {canAct && batch.can_move && <MoveBatch batch={batch} prefer="Settle" onDone={setBatch} />}
         {canAct && (
           <div className="pf-go">
             <button className="primary big" disabled={busy} onClick={() => advance('settling', 'Settling')}>
@@ -322,6 +327,7 @@ export function ProcessBatchPage({ batchId }: { batchId: string }) {
         summary={<>settled {spanOf(batch, 3, 4)}</>} keepOpen={batch.status === 'settling'}>
         <div className="big-clock">Settling for {clock(minutes)}</div>
         <div className="muted">Break it below once the layers have separated.</div>
+        {canAct && batch.can_move && batch.status === 'settling' && <MoveBatch batch={batch} prefer="Settle" onDone={setBatch} />}
       </FlowPart>
 
       <FlowPart n={5} title="Break" done={batch.status === 'drawn'} waiting={waiting('settling', 'Once it has settled.')}
@@ -335,6 +341,72 @@ export function ProcessBatchPage({ batchId }: { batchId: string }) {
   )
 }
 
+const VESSEL_WORD: Record<string, string> = { Acid: 'reactor', Settle: 'settle tank', MGR: 'MGR tank' }
+
+/** Pump the whole batch on to another tank — out of the reactor into a settle
+ *  tank, say — as each plant does before the break. */
+function MoveBatch({ batch, prefer, onDone }: { batch: ProcessBatch; prefer: string; onDone: (batch: ProcessBatch) => void }) {
+  const { plantId } = useApp()
+  const toast = useToast()
+  const vessels = useAsync(
+    () => api.get<any[]>(`/api/process/vessels${qs({ plant_id: plantId, department_id: batch.department_id })}`),
+    [plantId, batch.vessel_id],
+  )
+  const [open, setOpen] = useState(false)
+  const [to, setTo] = useState<number | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<any>(null)
+  const rank = (type: string) => (type === prefer ? 0 : type === 'Acid' ? 1 : 2)
+  const free = (vessels.data ?? [])
+    .filter((v) => !v.batch && v.location_id !== batch.vessel_id && v.total <= 0.5)
+    .sort((a, b) => rank(a.vessel_type) - rank(b.vessel_type))
+  const target = free.find((v) => v.location_id === to)
+
+  async function go() {
+    setBusy(true); setError(null)
+    try {
+      const moved = await api.post<ProcessBatch>(`/api/process/${batch.batch_id}/move`, { to_location_id: to })
+      toast.push('success', `Moved to ${moved.vessel?.number}`, `${fmtLbs(moved.total_in)} lbs · batch ${batch.batch_id}`)
+      setOpen(false); setTo(null)
+      onDone(moved)
+    } catch (err) { setError(err) } finally { setBusy(false) }
+  }
+
+  if (!open) {
+    return (
+      <div className="move-batch">
+        <button onClick={() => setOpen(true)}>Move it to another tank…</button>
+        <span className="muted small"> The whole batch goes, and it breaks from wherever it ends up.</span>
+      </div>
+    )
+  }
+  return (
+    <div className="move-batch open">
+      <div className="guide-line"><strong>Move {fmtLbs(batch.total_in)} lbs out of {batch.vessel?.number} into:</strong></div>
+      {error && <div style={{ marginBottom: 10 }}><ErrorBox error={error} /></div>}
+      {vessels.loading ? <Loading /> : free.length === 0
+        ? <div className="muted">Every other tank has something in it.</div>
+        : (
+          <div className="choice-list">
+            {free.map((v) => (
+              <button key={v.location_id} className={`choice${to === v.location_id ? ' selected' : ''}`} onClick={() => setTo(v.location_id)}>
+                <strong>{v.number}{to === v.location_id ? ' ✓' : ''}</strong>
+                <span>{VESSEL_WORD[v.vessel_type] ?? v.vessel_type} · empty{v.max_capacity ? `, holds ${fmtLbs(v.max_capacity)} lbs` : ''}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      <div className="pf-go" style={{ marginTop: 12, gap: 8 }}>
+        <button className="ghost" onClick={() => { setOpen(false); setTo(null) }}>Not now</button>
+        <button className="primary big" disabled={busy || !target || (target.max_capacity && target.max_capacity < batch.total_in)} onClick={go}>
+          {busy ? <span className="spinner" /> : null}
+          Move {fmtLbs(batch.total_in)} lbs from {batch.vessel?.number} to {target?.number ?? '—'}
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function spanOf(batch: ProcessBatch, from: number, to: number): string {
   const a = batch.timeline[from]?.at
   const b = batch.timeline[to]?.at
@@ -343,7 +415,11 @@ function spanOf(batch: ProcessBatch, from: number, to: number): string {
 
 function Charges({ batch, group }: { batch: ProcessBatch; group?: ProcessGuide }) {
   const ids = new Set((group?.materials ?? []).map((m) => m.material_id))
-  const rows = batch.transactions.filter((t) => t.to_location_id === batch.vessel_id && !t.voided && !t.is_reversal
+  // What went in, wherever the batch has moved since: the rows that made the
+  // process material (a move out of one tank into the next does not count).
+  const into = (t: Record<string, any>) => (batch.process_material
+    ? t.to_material_id === batch.process_material.material_id : t.to_location_id === batch.vessel_id)
+  const rows = batch.transactions.filter((t) => into(t) && !t.voided && !t.is_reversal
     && ids.has(t.from_material_id ?? t.to_material_id))
   if (!rows.length) return null
   return (

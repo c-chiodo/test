@@ -36,9 +36,10 @@ def _components(plan):
 
 def test_a_cattle_blend_plans_as_its_recipe(conn, cattle_order):
     plan = loadblend.plan(cattle_order, conn=conn)
-    assert [c["material_number"] for c in plan["components"]] == ["01007", "01008", "00003"]
-    assert [c["dose"] for c in plan["components"]] == [None, None, "ph"]
-    assert plan["components"][0]["required"] == pytest.approx(45_000 * 0.542)
+    # FE Cattle Blend 3.5 as Des Moines makes it.
+    assert [c["material_number"] for c in plan["components"]] == ["01007", "01003", "01008", "00003"]
+    assert [c["dose"] for c in plan["components"]] == [None, None, None, "ph"]
+    assert plan["components"][0]["required"] == pytest.approx(45_000 * 0.682)
     assert plan["target"] == {"analyte": "ph", "min": 2, "max": 4}      # the limit sheet's cattle blend pH
     assert all(c["from_location_id"] for c in plan["components"])
 
@@ -56,13 +57,13 @@ def test_a_straight_product_is_not_blended(conn, admin_user):
 def test_the_whole_truck_posts_once_with_the_dosing_log(conn, admin_user, cattle_order):
     plan = loadblend.plan(cattle_order, conn=conn)
     # Caustic went in three times before the pH was right. None of that was posted.
-    doses = [{"quantity": 1_500, "reading": 1.6}, {"quantity": 400, "reading": 1.9}, {"quantity": 209, "reading": 2.6}]
+    doses = [{"quantity": 1_000, "reading": 1.6}, {"quantity": 300, "reading": 1.9}, {"quantity": 140, "reading": 2.6}]
     got = loadblend.execute(cattle_order, {"trailer_number": "390", "components": _components(plan), "doses": doses},
                             admin_user, conn)
     assert got["blended"] is True
-    assert [c["material_number"] for c in got["components"]] == ["01007", "01008", "00003"]
-    caustic = got["components"][2]
-    assert caustic["quantity"] == pytest.approx(2_109)                 # the doses, summed
+    assert [c["material_number"] for c in got["components"]] == ["01007", "01003", "01008", "00003"]
+    caustic = got["components"][3]
+    assert caustic["quantity"] == pytest.approx(1_440)                 # the doses, summed
     rows = db.query(
         """SELECT tt.code, tt.kind, t.to_bol, t.remarks, tm.number AS to_number FROM inventory_transaction t
            JOIN transaction_type tt ON tt.transaction_type_id = t.transaction_type_id
@@ -72,7 +73,7 @@ def test_the_whole_truck_posts_once_with_the_dosing_log(conn, admin_user, cattle
     assert {r["code"] for r in rows} == {"PROD_LOAD"} and {r["kind"] for r in rows} == {"LOAD"}
     assert len({r["to_bol"] for r in rows}) == 1                       # one BOL for the truck
     assert {r["to_number"] for r in rows} == {"01021"}                  # the blend is what is on the trailer
-    assert "+1,500 lbs -> ph 1.6" in rows[2]["remarks"]
+    assert "+1,000 lbs -> ph 1.6" in rows[3]["remarks"]
     # No reversals were needed to get there.
     assert db.scalar("SELECT COUNT(*) FROM inventory_transaction WHERE order_id = ? AND is_reversal = 1",
                      (cattle_order,), conn) == 0
@@ -110,7 +111,7 @@ def test_a_load_needs_a_trailer_and_its_tanks(conn, admin_user, cattle_order):
 def test_a_retried_save_returns_the_same_truck(conn, admin_user, cattle_order):
     plan = loadblend.plan(cattle_order, conn=conn)
     payload = {"trailer_number": "393", "components": _components(plan), "idempotency_key": "truck-393",
-               "doses": [{"quantity": 2_000, "reading": 2.8}]}
+               "doses": [{"quantity": 1_440, "reading": 2.8}]}
     first = loadblend.execute(cattle_order, dict(payload), admin_user, conn)
     again = loadblend.execute(cattle_order, dict(payload), admin_user, conn)
     assert again["transaction_id"] == first["transaction_id"]

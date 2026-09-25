@@ -706,6 +706,10 @@ def set_blend_recipe(material_id: int, payload: dict = Body(...), user: dict = U
         yield_pct=payload.get("yield_pct") or 100.0,
         vessel_type=payload.get("vessel_type") or "Blend",
         method=payload.get("method") or "blend",
+        outputs=payload.get("outputs") or None,
+        process_material_id=payload.get("process_material_id") or None,
+        expected_tfa=payload.get("expected_tfa"),
+        plant_id=payload.get("plant_id") or None,
     )
 
 
@@ -795,6 +799,11 @@ def process_charge(batch_id: str, payload: dict = Body(...), user: dict = User) 
 @app.post("/api/process/{batch_id}/advance", tags=["process"])
 def process_advance(batch_id: str, payload: dict = Body(...), user: dict = User) -> dict:
     return process.advance(batch_id, str(payload.get("to") or ""), user)
+
+
+@app.post("/api/process/{batch_id}/move", tags=["process"])
+def process_move(batch_id: str, payload: dict = Body(...), user: dict = User) -> dict:
+    return process.move(batch_id, payload, user)
 
 
 @app.post("/api/process/{batch_id}/draw", tags=["process"])

@@ -332,6 +332,9 @@ export interface ProcessBatch {
   started_by: string
   drawn_lbs: number | null
   vessel: { location_id: number; number: string; description: string; max_capacity: number | null } | null
+  /** Tank to tank on its way to the break: reactor, cooker, settle tank. */
+  moves: { transaction_id: number; from: string; to: string; lbs: number; at: string }[]
+  can_move: boolean
   product: { material_id: number; number: string; description: string } | null
   process_material: { material_id: number; number: string; description: string } | null
   recipe: { recipe_id: number; name: string; notes: string; yield_pct: number; vessel_type: string; expected_tfa: number | null } | null

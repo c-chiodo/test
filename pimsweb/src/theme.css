@@ -1002,3 +1002,7 @@ details.definitions dl { display: grid; gap: 8px; margin: 8px 0 0; }
 details.definitions dt { font-weight: 600; }
 details.definitions dd { margin: 2px 0 0; color: var(--text-2); }
 @media (max-width: 900px) { .grid.cols-3 { grid-template-columns: minmax(0, 1fr); } }
+
+/* moving a batch tank to tank */
+.move-batch { margin: 12px 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.move-batch.open { display: block; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }

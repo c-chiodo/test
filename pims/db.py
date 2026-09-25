@@ -237,6 +237,7 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("blend_recipe_component", "grp", "ALTER TABLE blend_recipe_component ADD COLUMN grp TEXT"),
     ("order", "recipe_id", 'ALTER TABLE "order" ADD COLUMN recipe_id INTEGER'),
     ("blend_recipe_component", "dose", "ALTER TABLE blend_recipe_component ADD COLUMN dose TEXT"),
+    ("blend_recipe", "plant_id", "ALTER TABLE blend_recipe ADD COLUMN plant_id INTEGER"),
 ]
 
 #: Indexes that must exist alongside the migrated columns. ``CREATE INDEX IF
@@ -284,11 +285,13 @@ def apply_migrations(conn: sqlite3.Connection | None = None) -> list[str]:
             " 'PROD-LOAD: blend onto a trailer', 'LOAD' FROM transaction_type"
         )
     if "blend_recipe" in existing:
-        # One active recipe per product became one per product and vessel.
+        # One active recipe per product became one per product and vessel,
+        # then one per product, vessel and plant (NULL = every plant).
         conn.execute("DROP INDEX IF EXISTS ux_recipe_material")
+        conn.execute("DROP INDEX IF EXISTS ux_recipe_material_vessel")
         conn.execute(
-            "CREATE UNIQUE INDEX IF NOT EXISTS ux_recipe_material_vessel"
-            " ON blend_recipe (material_id, vessel_type) WHERE active = 1"
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_recipe_material_vessel_plant"
+            " ON blend_recipe (material_id, vessel_type, COALESCE(plant_id, 0)) WHERE active = 1"
         )
     return applied
 

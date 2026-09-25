@@ -152,7 +152,7 @@ through the same guard and preflight as the mirror.
 | Dashboard, orders, order detail, activity | Creating, editing, closing orders |
 | Inventory, point-in-time balances | Receive, produce, move, load, ship, shrinkage |
 | Inquiry (all four tabs), custom query, CSV export | Voids |
-| **Reports** — acid yields, caustic per load, reversals, and the legacy-layout exports, read from the mirrored ledger (legacy REVERSAL rows included) | Blending onto the trailer (Load & ship) |
+| **Reports** — acid yields, caustic per load, reversals, and the legacy-layout exports, read from the mirrored ledger (legacy REVERSAL rows included; a SHIPADJ correction under a SHIP-LEAVE nets out) | Blending onto the trailer (Load & ship) |
 | Scan / search box | QC entry, in-process readings, QA checklists |
 | Data quality, alerts, daily digest | Load & ship, Blend (hidden) |
 | The LIMS matrix with the FE-2026-001 filters | Standing orders, auto-close, GP sync (disabled) |

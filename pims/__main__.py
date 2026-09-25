@@ -101,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
 
     dept_cmd = sub.add_parser("department", help="list or add departments, or set a batch recipe")
     dept_cmd.add_argument("action", choices=["list", "add", "recipe"])
-    dept_cmd.add_argument("--plant", default="DM", help="plant code for list")
+    dept_cmd.add_argument("--plant", default=None,
+                          help="plant code: for list (default DM); for recipe, the plant it is for (default every plant)")
     dept_cmd.add_argument("--code", help="department code, e.g. ACID")
     dept_cmd.add_argument("--name", help="department name, e.g. Acid")
     dept_cmd.add_argument("--plants", default="", help="comma-separated plant codes for add")
@@ -251,9 +252,10 @@ def main(argv: list[str] | None = None) -> int:
 
         db.init_db(settings)
         if args.action == "list":
-            plant_id = db.scalar("SELECT plant_id FROM plant WHERE code = ?", (args.plant.upper(),))
+            code = (args.plant or "DM").upper()
+            plant_id = db.scalar("SELECT plant_id FROM plant WHERE code = ?", (code,))
             if not plant_id:
-                parser.error(f"no plant {args.plant}")
+                parser.error(f"no plant {code}")
             _print(departments.for_plant(plant_id))
             return 0
         if not args.code:
@@ -283,10 +285,31 @@ def main(argv: list[str] | None = None) -> int:
             parts.append({"material_id": material(number), "percentage": float(pct or 0)})
         product = material(args.product)
         name = db.scalar("SELECT description FROM material WHERE material_id = ?", (product,))
+        plant_id = None
+        if args.plant:
+            plant_id = db.scalar("SELECT plant_id FROM plant WHERE code = ?", (args.plant.upper(),))
+            if not plant_id:
+                parser.error(f"no plant {args.plant}")
+        extra: dict = {}
+        if args.staged:
+            # A staged recipe is more than its ratios — what the tank holds, what
+            # it breaks into, the TFA. Keep those from the recipe being replaced.
+            current = db.query_one(
+                "SELECT * FROM blend_recipe WHERE material_id = ? AND vessel_type = ? AND active = 1"
+                " AND method = 'staged' AND (plant_id = ? OR plant_id IS NULL) ORDER BY plant_id IS NULL LIMIT 1",
+                (product, args.vessel, plant_id),
+            )
+            if current:
+                full = blend.recipe_for_material(product, recipe_id=current["recipe_id"])
+                groups = {c["material_id"]: c.get("grp") for c in full["components"]}
+                for part in parts:
+                    part["grp"] = groups.get(part["material_id"])
+                extra = {"process_material_id": full["process_material_id"], "expected_tfa": full["expected_tfa"],
+                         "outputs": full["outputs"]}
         _print(blend.set_recipe(
             product, name, parts, jobs.system_user(), notes="Set from the command line.",
             department_id=department_id, yield_pct=args.yield_pct, vessel_type=args.vessel,
-            method="staged" if args.staged else "blend",
+            method="staged" if args.staged else "blend", plant_id=plant_id, **extra,
         ))
         return 0
 

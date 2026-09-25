@@ -51,14 +51,14 @@ MATERIALS: dict[str, list[int]] = {
     "soap": [6, 7, 10],            # Soap - Degum, Soap - Gum, Wetgums
     "acid": [1],
     "steam": [4],
-    "water_in": [11, 1008],        # city water, process water (reprocessed)
+    "water_in": [11, 15, 1008],    # city water, rain water, process water (reprocessed)
     "process": [1006],             # Soap in Process-Veg
     "mgr": [1007],                 # MGR veg
     "mgr_animal": [1003],
-    "oil": [1018, 1019],           # the 20-series oils off the settle
+    "oil": [1017, 1018, 1019],     # the 20-series oils off the settle: PJ, SC, DM
     "process_water": [1008],
     "caustic": [3],
-    "out_mgrv": [1007, 3019],
+    "out_mgrv": [1007, 3017, 3018, 3019],
     "out_mgra": [1003, 5003],
 }
 
@@ -132,7 +132,7 @@ SELECT t.transaction_id, t.parent_transaction_id, t.order_id, t.plant_id, p.code
        t.to_material_id, tm.number AS to_number, tm.description AS to_description,
        t.to_location_id, tl.number AS to_location, tlt.name AS to_location_type, t.to_qty, t.to_bol,
        t.trailer_number, t.tank_hours, t.employee_hours, t.remarks, t.voided, t.is_reversal,
-       d.code AS department_code, u.full_name AS user_name,
+       d.code AS department_code, u.full_name AS user_name, ptt.kind AS parent_kind,
        o.order_reference, o.ship_method, v.gp_vendorid, v.name AS vendor_name
 FROM inventory_transaction t
 JOIN transaction_type tt ON tt.transaction_type_id = t.transaction_type_id
@@ -147,6 +147,8 @@ LEFT JOIN department d ON d.department_id = t.department_id
 LEFT JOIN app_user u ON u.user_id = t.user_id
 LEFT JOIN "order" o ON o.order_id = t.order_id
 LEFT JOIN vendor v ON v.vendor_id = o.vendor_id
+LEFT JOIN inventory_transaction pt ON pt.transaction_id = t.parent_transaction_id
+LEFT JOIN transaction_type ptt ON ptt.transaction_type_id = pt.transaction_type_id
 """
 
 
@@ -213,6 +215,19 @@ def acid_yields(filters: dict[str, Any], user: dict, conn=None) -> dict[str, Any
         totals[key] += qty
         daily[day][key] += qty
 
+    # Which tanks reprocess MGR. Plants name them differently (13–17 at Des
+    # Moines, 11–15 at Sioux City, 11–13 and 40 at Pleasant Hill), so a tank
+    # is one if its type says so, or if it is where MGR is regularly broken
+    # into oil — not the odd time oil was pulled off a storage tank.
+    broken_from: dict[int, dict[int, int]] = defaultdict(lambda: defaultdict(int))
+    for r in rows:
+        if r["kind"] == "PRODUCE" and r["f"] in m["mgr"] and r["t"] in m["oil"] and r["from_location_id"]:
+            broken_from[r["plant_id"]][r["from_location_id"]] += 1
+    vessels = {loc for counts in broken_from.values() for loc, n in counts.items() if n >= 0.2 * max(counts.values())}
+
+    def mgr_vessel(location_id: Any, location_type: Any) -> bool:
+        return location_type == "MGR" or location_id in vessels
+
     for r in rows:
         f, t, kind, day = r["f"], r["t"], r["kind"], r["day"]
         if kind == "RECEIVE" and t in m["soap"]:
@@ -237,13 +252,15 @@ def acid_yields(filters: dict[str, Any], user: dict, conn=None) -> dict[str, Any
             elif f in m["mgr"]:
                 if t in m["oil"]:
                     add("mgr_oil", r["to_qty"], day)
-                elif t in m["mgr"] and r["to_location_type"] != "MGR" and r["from_location_id"] != r["to_location_id"]:
+                elif t in m["mgr"] and not mgr_vessel(r["to_location_id"], r["to_location_type"]) \
+                        and r["from_location_id"] != r["to_location_id"]:
                     add("mgr_mgr", r["to_qty"], day)
                 elif t in m["process_water"]:
                     add("mgr_water", r["to_qty"], day)
             elif f in m["mgr_animal"] and t in m["oil"]:
                 add("mgra_oil", r["to_qty"], day)
-            if t in m["mgr"] and r["to_location_type"] == "MGR" and r["from_location_type"] != "MGR":
+            if t in m["mgr"] and mgr_vessel(r["to_location_id"], r["to_location_type"]) \
+                    and not mgr_vessel(r["from_location_id"], r["from_location_type"]):
                 add("mgr_processed", r["to_qty"], day)
             if t in m["oil"]:
                 add("total_oil", r["to_qty"], day)
@@ -264,6 +281,10 @@ def acid_yields(filters: dict[str, Any], user: dict, conn=None) -> dict[str, Any
             elif f in m["caustic"]:
                 add("out_caustic", r["from_qty"], day)
         if kind == "SHIP" and f in m["process_water"]:
+            add("water_shipped", r["from_qty"], day)
+        # A legacy correction to a shipment (SHIPADJ under a SHIP-LEAVE) nets
+        # against the second SHIP-LEAVE it comes with.
+        if kind == "ADJUST" and r["parent_kind"] == "SHIP" and f in m["process_water"]:
             add("water_shipped", r["from_qty"], day)
 
     theoretical = totals["soap_processed"] * tfa / 100.0

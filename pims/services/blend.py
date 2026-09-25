@@ -46,16 +46,17 @@ def recipes(conn=None, include_inactive: bool = False) -> list[dict]:
     sql = """
         SELECT r.recipe_id, r.material_id, r.name, r.notes, r.active,
                r.department_id, r.yield_pct, r.vessel_type, r.method,
-               r.process_material_id, r.expected_tfa,
+               r.process_material_id, r.expected_tfa, r.plant_id, p.code AS plant_code,
                d.code AS department_code, d.description AS department,
                m.number AS material_number, m.description AS material_description
         FROM blend_recipe r
         JOIN material m ON m.material_id = r.material_id
         LEFT JOIN department d ON d.department_id = r.department_id
+        LEFT JOIN plant p ON p.plant_id = r.plant_id
     """
     if not include_inactive:
         sql += " WHERE r.active = 1"
-    rows = db.query(sql + " ORDER BY m.number, r.vessel_type", (), conn)
+    rows = db.query(sql + " ORDER BY m.number, r.vessel_type, p.code", (), conn)
     for row in rows:
         row["components"] = _components(row["recipe_id"], conn)
         row["outputs"] = _outputs(row["recipe_id"], conn)
@@ -94,10 +95,12 @@ def _outputs(recipe_id: int, conn) -> list[dict]:
 
 def recipe_for_material(
     material_id: int, conn=None, *, method: str | None = None, recipe_id: int | None = None,
+    plant_id: int | None = None,
 ) -> dict | None:
     """The active recipe for a product. A product can have one per kind of
     vessel; ``method`` picks blend or staged, and a work order that names its
-    recipe gets that one. With neither, a blend recipe comes first."""
+    recipe gets that one. With neither, a blend recipe comes first. With a
+    ``plant_id``, that plant's own recipe comes before the every-plant one."""
 
     if recipe_id:
         row = db.query_one("SELECT * FROM blend_recipe WHERE recipe_id = ?", (recipe_id,), conn)
@@ -107,7 +110,14 @@ def recipe_for_material(
         if method:
             sql += " AND method = ?"
             params.append(method)
-        row = db.query_one(sql + " ORDER BY method = 'blend' DESC, recipe_id LIMIT 1", params, conn)
+        if plant_id:
+            sql += " AND (plant_id = ? OR plant_id IS NULL)"
+            params.append(plant_id)
+        # The plant's own recipe first; asked for no plant, the every-plant one.
+        first = "plant_id IS NULL" if plant_id else "plant_id IS NOT NULL"
+        row = db.query_one(
+            sql + f" ORDER BY {first}, method = 'blend' DESC, recipe_id LIMIT 1", params, conn,
+        )
     if row:
         row["components"] = _components(row["recipe_id"], conn)
         row["outputs"] = _outputs(row["recipe_id"], conn)
@@ -129,6 +139,7 @@ def set_recipe(
     outputs: list[dict] | None = None,
     process_material_id: int | None = None,
     expected_tfa: float | None = None,
+    plant_id: int | None = None,
 ) -> dict:
     """Create or replace the recipe for a product.
 
@@ -194,8 +205,9 @@ def set_recipe(
 
     with db.transaction(conn):
         db.execute(
-            "UPDATE blend_recipe SET active = 0 WHERE material_id = ? AND vessel_type = ? AND active = 1",
-            (material_id, vessel_type),
+            "UPDATE blend_recipe SET active = 0 WHERE material_id = ? AND vessel_type = ? AND active = 1"
+            " AND COALESCE(plant_id, 0) = COALESCE(?, 0)",
+            (material_id, vessel_type, plant_id),
             conn,
         )
         recipe_id = db.insert(
@@ -204,6 +216,7 @@ def set_recipe(
                 "material_id": material_id, "name": name.strip(), "notes": notes, "active": 1,
                 "department_id": department_id, "yield_pct": yield_pct, "vessel_type": vessel_type,
                 "method": method, "process_material_id": process_material_id, "expected_tfa": expected_tfa,
+                "plant_id": plant_id,
             },
             conn,
         )
@@ -216,6 +229,7 @@ def set_recipe(
                     "percentage": float(component["percentage"]),
                     "sort_order": index * 10,
                     "grp": component.get("grp") or None,
+                    "dose": component.get("dose") or None,
                 },
                 conn,
             )
@@ -240,7 +254,7 @@ def set_recipe(
             summary=f"Recipe set for material {material_id}",
             detail={
                 "name": name, "components": components, "department_id": department_id,
-                "yield_pct": yield_pct, "vessel_type": vessel_type, "method": method,
+                "yield_pct": yield_pct, "vessel_type": vessel_type, "method": method, "plant_id": plant_id,
             },
             conn=conn,
         )
@@ -286,7 +300,7 @@ def plan(
             "Say what product to blend.", fields={"material_id": "Choose a product."}
         )
 
-    recipe = recipe_for_material(int(material_id), conn)
+    recipe = recipe_for_material(int(material_id), conn, plant_id=plant_id)
     material = db.query_one(
         "SELECT number, description FROM material WHERE material_id = ?",
         (material_id,),
@@ -458,7 +472,8 @@ def execute(payload: dict[str, Any], user: dict, conn=None) -> dict:
 
     # The recipe, not the client, decides the yield: a batch posted with a
     # made-up yield would make product out of nothing.
-    recipe = recipe_for_material(material_id, conn) if material_id else None
+    plant_of_tank = db.scalar("SELECT plant_id FROM location WHERE location_id = ?", (to_location_id,), conn)
+    recipe = recipe_for_material(material_id, conn, plant_id=plant_of_tank) if material_id else None
     if recipe and recipe.get("method") == "staged":
         raise BusinessRuleError(
             "This product is made in stages — charged, settled and drawn off — "

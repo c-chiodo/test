@@ -46,7 +46,7 @@ DEPARTMENTS = [
 ]
 
 #: Departments not every plant has. Acidulation runs where the soapstock is.
-PLANT_DEPARTMENTS = {"ACID": ("DM", "SC")}
+PLANT_DEPARTMENTS = {"ACID": ("DM", "SC", "PJ")}
 
 ORDER_TYPES = [
     (1, "SO", "Sales Order"),
@@ -269,6 +269,7 @@ MATERIALS = [
     ("01018", "Veg SC (20 series)", "Veg oil", 2, "SC"),
     ("02021", "AOX Santoquin", "Raw Material", 2, "DM SC"),
     ("02048", "LIPIDOL GOLD", "Raw Material", 2, "DM SC"),
+    ("01017", "Veg PJ (20 series)", "Veg oil", 2, "PJ"),
 ]
 
 CUSTOMERS = [
@@ -365,6 +366,21 @@ BLEND_RECIPES = [
     ("05081", "HC3800 XL - AOX .025%", [("05003", 99.635), ("02021", 0.025), ("02048", 0.34)]),
 ]
 
+#: Each plant's own blend, measured from the PROD-LOAD rows of June–August
+#: 2026 (the main components, normalised to 100; tank rinse water and the
+#: odd cleanout left out). The plants make the same product differently, so
+#: these win over the every-plant recipes above at their plant.
+PLANT_BLEND_RECIPES = [
+    ("DM", "01020", "FE Cattle Blend - 2.5", [("01007", 67.6), ("01003", 28.8), ("01008", 1.5), ("00003", 2.1)]),
+    ("SC", "01020", "FE Cattle Blend - 2.5", [("01007", 60.6), ("01008", 29.4), ("01003", 6.4), ("00003", 3.6)]),
+    ("DM", "01021", "FE Cattle Blend - 3.5", [("01007", 68.2), ("01003", 17.8), ("01008", 10.8), ("00003", 3.2)]),
+    ("SC", "01021", "FE Cattle Blend - 3.5", [("01007", 84.0), ("01008", 10.9), ("01003", 1.0), ("00003", 4.1)]),
+    ("DM", "01031", "MGR veg - 2.5", [("01007", 97.6), ("00003", 2.4)]),
+    ("SC", "01031", "MGR veg - 2.5", [("01007", 88.1), ("01008", 7.8), ("00003", 4.1)]),
+    ("PJ", "01031", "MGR veg - 2.5", [("01007", 82.8), ("01008", 14.7), ("00003", 2.5)]),
+]
+PLANT_BLEND_NOTE = "Measured from this plant's PROD-LOAD rows, June–August 2026; caustic is dosed to the pH."
+
 #: Acidulation as the Des Moines yields workbook and the legacy ledger show it:
 #: soap charged into a settle tank as 1006 Soap in Process, acid (5.1 lbs per
 #: 100 lbs of soap over the sampled week) and steam (2.6) PRODUCED in on top;
@@ -373,27 +389,36 @@ BLEND_RECIPES = [
 #: workbook's measured averages; the expected first-pass yield (55% of what
 #: the soap's TFA could give) and MGR oil fraction (34%) are its figures too.
 SOAPS = ["00007", "00006", "00010", "00009"]
+_SETTLE_OUT = [("mgr", "01007", "MGR", "moisture,spintest"), ("water", "01008", "Process water", "")]
+
+
+def _settle(oil: str, acid: float, steam: float, fpy: float, plant: str):
+    outputs = [(oil, "oil", "Oil (20's)", "moisture,spintest")] + [(m, r, l, x) for r, m, l, x in _SETTLE_OUT]
+    return (oil, "Soap settle", "Acid", "01006",
+            [*[(n, 100.0, "soap") for n in SOAPS], ("00001", acid, None), ("00004", steam, None)],
+            outputs, 26.0, fpy, plant)
+
+
+def _mgr(oil: str, plant: str):
+    return (oil, "MGR reprocess", "MGR", "01007", [("01007", 100.0, None)],
+            [(oil, "oil", "Oil (20's)", "moisture,spintest"), ("01007", "mgr", "MGR (back to storage)", "moisture,spintest"),
+             ("01008", "water", "Process water", "")], None, 34.0, plant)
+
+
+#: product, name, vessel it starts in, process material, components, outputs,
+#: TFA, expected yield, plant. Acid and steam per 100 lbs of soap and the
+#: first-pass yield (at 26% TFA) are each plant's own, measured from its
+#: PRODUCED rows of June–August 2026, reversals netted: Des Moines 5.2 acid /
+#: 2.4 steam / 68%, Sioux City 4.8 / 7.7 / 61%, Pleasant Hill 5.7 / 0.6 / 53%
+#: (Pleasant Hill steams the MGR rather than the soap).
 STAGED_RECIPES = [
-    # product, name, vessel, process material, components, outputs, TFA, yield
-    ("01019", "Soap settle", "Settle", "01006",
-     [*[(n, 100.0, "soap") for n in SOAPS], ("00001", 5.1, None), ("00004", 2.6, None)],
-     [("01019", "oil", "Oil (20's)", "moisture,spintest"), ("01007", "mgr", "MGR", "moisture,spintest"),
-      ("01008", "water", "Process water", "")],
-     26.0, 55.0),
-    ("01018", "Soap settle", "Settle", "01006",
-     [*[(n, 100.0, "soap") for n in SOAPS], ("00001", 5.1, None), ("00004", 2.6, None)],
-     [("01018", "oil", "Oil (20's)", "moisture,spintest"), ("01007", "mgr", "MGR", "moisture,spintest"),
-      ("01008", "water", "Process water", "")],
-     26.0, 55.0),
-    ("01019", "MGR reprocess", "MGR", "01007",
-     [("01007", 100.0, None)],
-     [("01019", "oil", "Oil (20's)", "moisture,spintest"), ("01007", "mgr", "MGR (to 41)", "moisture,spintest"),
-      ("01008", "water", "Process water", "")],
-     None, 34.0),
+    _settle("01019", 5.2, 2.4, 68.0, "DM"), _mgr("01019", "DM"),
+    _settle("01018", 4.8, 7.7, 61.0, "SC"), _mgr("01018", "SC"),
+    _settle("01017", 5.7, 0.6, 53.0, "PJ"), _mgr("01017", "PJ"),
 ]
 STAGED_NOTE = (
-    "Ratios from the Des Moines yields workbook (acid 5.1 and steam 2.6 lbs per "
-    "100 lbs of soap; TFA 26% assumed). Adjust to the plant's practice."
+    "Acid and steam per 100 lbs of soap and the first-pass yield are this plant's averages, "
+    "June–August 2026, TFA 26% assumed. Adjust to current practice."
 )
 
 #: Kiosk PINs for the shared plant terminal. Demo values.
@@ -450,14 +475,31 @@ def _seed_recipes(conn, material_ids: dict[str, int]) -> None:
                 },
                 conn,
             )
+    plant_ids = {code: pid for pid, code, _n in PLANTS}
+    for plant, product, name, parts in PLANT_BLEND_RECIPES:
+        recipe_id = db.insert(
+            "blend_recipe",
+            {"material_id": material_ids[product], "name": name, "notes": PLANT_BLEND_NOTE, "active": 1,
+             "department_id": departments["BLND"], "yield_pct": 100.0, "vessel_type": "Blend", "method": "blend",
+             "plant_id": plant_ids[plant]},
+            conn,
+        )
+        for index, (component, pct) in enumerate(parts):
+            db.insert(
+                "blend_recipe_component",
+                {"recipe_id": recipe_id, "material_id": material_ids[component], "percentage": pct,
+                 "sort_order": index * 10, "dose": "ph" if component == "00003" else None},
+                conn,
+            )
     acid = next(did for did, code, _d in DEPARTMENTS if code == "ACID")
-    for product, name, vessel, process_material, parts, outputs, tfa, yield_pct in STAGED_RECIPES:
+    for product, name, vessel, process_material, parts, outputs, tfa, yield_pct, plant in STAGED_RECIPES:
         recipe_id = db.insert(
             "blend_recipe",
             {
                 "material_id": material_ids[product], "name": name, "notes": STAGED_NOTE, "active": 1,
                 "department_id": acid, "yield_pct": yield_pct, "vessel_type": vessel, "method": "staged",
                 "process_material_id": material_ids[process_material], "expected_tfa": tfa,
+                "plant_id": plant_ids[plant],
             },
             conn,
         )
@@ -1209,9 +1251,101 @@ def _seed_qc(conn, rng, *, order_id, plant_id, material_number, material_id, sta
                 )
 
 
+#: Each acid plant's tanks, numbered as that plant numbers them, from the
+#: locations its June–August 2026 ledger uses. Soap is cooked with acid in a
+#: reactor, moved into a settle tank and broken there; MGR is reprocessed in
+#: its own tanks. The plants number these differently, which is why nothing
+#: in the code reads a tank number.
+#:   (number, description, type, capacity, opening stock)
+ACID_LAYOUT = {
+    "DM": [
+        *[(str(n), f"Reactor {n}", "Acid", 120_000, None) for n in (1, 2, 3)],
+        ("40", "Soap in process 40", "Acid", 150_000, None),
+        *[(str(n), f"Settle tank {n}", "Settle", 150_000, None) for n in range(4, 11)],
+        ("11", "MGR animal 11", "Tank", 100_000, ("01003", 40_000)),
+        ("12", "MGR animal 12", "Tank", 100_000, ("01003", 25_000)),
+        *[(str(n), f"MGR tank {n}", "MGR", 60_000, None) for n in range(13, 18)],
+        ("20", "20's oil 20", "Tank", 200_000, ("01019", 60_000)),
+        ("21", "20's oil 21", "Tank", 200_000, ("01019", 30_000)),
+        *[(str(n), f"20's oil {n}", "Tank", 200_000, None) for n in (22, 23, 24)],
+        ("30", "Process water 30", "Tank", 150_000, None),
+        ("31", "Process water 31", "Tank", 150_000, None),
+        ("32", "Process water 32", "Tank", 150_000, ("01008", 40_000)),
+        ("33", "Process water 33", "Tank", 150_000, ("01008", 20_000)),
+        ("34", "Process water 34", "Tank", 150_000, None),
+        ("41", "MGR veg out 41", "Tank", 100_000, ("01007", 60_000)),
+        ("42", "MGR veg 42", "Tank", 100_000, ("01007", 25_000)),
+        ("44", "MGR veg 44", "Tank", 100_000, ("01007", 20_000)),
+        ("101", "Caustic 101", "Tank", 100_000, ("00003", 60_000)),
+        ("102", "Acid 102", "Tank", 80_000, ("00001", 20_000)),
+        ("103", "Acid 103", "Tank", 80_000, ("00001", 30_000)),
+        ("975", "Steam", "Utility", None, None),
+    ],
+    "SC": [
+        *[(str(n), f"Reactor {n}", "Acid", 120_000, None) for n in (110, 111)],
+        *[(str(n), f"Cooker {n}", "Acid", 150_000, None) for n in (1, 2, 3)],
+        *[(str(n), f"Settle tank {n}", "Settle", 150_000, None) for n in range(4, 11)],
+        *[(str(n), f"MGR tank {n}", "MGR", 60_000, None) for n in range(11, 16)],
+        ("20", "20's oil 20", "Tank", 200_000, ("01018", 40_000)),
+        *[(str(n), f"20's oil {n}", "Tank", 200_000, None) for n in (21, 22, 23)],
+        ("30", "Process water 30", "Tank", 150_000, ("01008", 30_000)),
+        ("31", "Process water 31", "Tank", 150_000, ("01008", 15_000)),
+        ("40", "MGR veg 40", "Tank", 100_000, ("01007", 40_000)),
+        ("41", "MGR veg 41", "Tank", 100_000, ("01007", 20_000)),
+        ("60", "MGR veg 60", "Tank", 100_000, ("01007", 20_000)),
+        ("61", "MGR veg 61", "Tank", 100_000, None),
+        ("82", "MGR animal 82", "Tank", 100_000, ("01003", 30_000)),
+        ("83", "MGR animal 83", "Tank", 100_000, None),
+        ("100", "Acid 100", "Tank", 80_000, ("00001", 25_000)),
+        ("101", "Caustic 101", "Tank", 100_000, ("00003", 60_000)),
+        ("102", "Acid 102", "Tank", 80_000, ("00001", 15_000)),
+        ("975", "Steam", "Utility", None, None),
+    ],
+    "PJ": [
+        *[(str(n), f"Reactor {n}", "Acid", 120_000, None) for n in (110, 111)],
+        *[(str(n), f"Settle tank {n}", "Settle", 150_000, None) for n in range(1, 8)],
+        *[(str(n), f"MGR tank {n}", "MGR", 60_000, None) for n in (11, 12, 13)],
+        ("20", "20's oil 20", "Tank", 200_000, ("01017", 30_000)),
+        ("21", "20's oil 21", "Tank", 200_000, None),
+        ("25", "20's oil 25", "Tank", 200_000, None),
+        ("30", "Process water 30", "Tank", 150_000, ("01008", 25_000)),
+        ("31", "Process water 31", "Tank", 150_000, None),
+        ("40", "MGR veg 40", "Tank", 100_000, ("01007", 40_000)),
+        ("100", "Acid 100", "Tank", 80_000, ("00001", 20_000)),
+        ("102", "Caustic 102", "Tank", 100_000, ("00003", 50_000)),
+        ("975", "Steam", "Utility", None, None),
+    ],
+}
+
+#: How each plant runs, for the seeded history: where soap is charged, where
+#: it goes on its way to a settle tank, which tanks settle, reprocess and
+#: store, and the averages measured from its ledger.
+ACID_PLANTS = {
+    "DM": {"oil": "01019", "reactors": ["1", "2", "3", "40"], "via": [], "settles": [str(n) for n in range(4, 11)],
+           "mgr_vessels": [str(n) for n in range(13, 18)], "oil_tanks": ["20", "21", "22", "23", "24"],
+           "water_tanks": ["32", "33", "34", "31", "30"], "mgr_out": "41", "mgr_back": "42", "mgr_store": "44",
+           "animal": "11", "acid": "103", "caustic": "101", "acid_per": 5.2, "steam_per": 2.4, "fpy": 0.68,
+           "mgr_split": 0.26, "settles_a_day": 0.9, "reprocess_every": 3, "loads": ("01021", "01020", "01031"),
+           "load_chance": 0.85},
+    "SC": {"oil": "01018", "reactors": ["110", "111"], "via": ["1", "2", "3"], "settles": [str(n) for n in range(4, 11)],
+           "mgr_vessels": [str(n) for n in range(11, 16)], "oil_tanks": ["20", "21", "22", "23"],
+           "water_tanks": ["30", "31"], "mgr_out": "40", "mgr_back": "41", "mgr_store": "60",
+           "animal": "82", "acid": "100", "caustic": "101", "acid_per": 4.8, "steam_per": 7.7, "fpy": 0.61,
+           "mgr_split": 0.26, "settles_a_day": 0.95, "reprocess_every": 2, "loads": ("01020", "01020", "01021", "01031"),
+           "load_chance": 0.9},
+    "PJ": {"oil": "01017", "reactors": ["110", "111"], "via": [], "settles": ["4", "5", "6", "7", "1", "2", "3"],
+           "mgr_vessels": ["11", "12", "13"], "oil_tanks": ["20", "21", "25"],
+           "water_tanks": ["30", "31"], "mgr_out": "40", "mgr_back": "40", "mgr_store": "40",
+           "animal": None, "acid": "100", "caustic": "102", "acid_per": 5.7, "steam_per": 0.6, "fpy": 0.53,
+           "mgr_split": 0.30, "settles_a_day": 0.4, "reprocess_every": 5, "loads": ("01031",),
+           "load_chance": 0.5},
+}
+
+
 def _seed_acid(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> None:
-    """The acid department's tanks, numbered as Des Moines numbers them, with
-    opening stock, open work, a settle tank mid-batch and a railcar on the spur.
+    """The acid department's tanks, numbered as each plant numbers them, with
+    opening stock, open work, a batch settling at Des Moines and a railcar on
+    the Sioux City spur.
 
     Written after everything else, with fixed values rather than the shared
     random stream, so adding it did not reshuffle the rest of the demo ledger.
@@ -1223,33 +1357,6 @@ def _seed_acid(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> 
     opened = (now - timedelta(days=95)).isoformat()
     order_id = int(db.scalar('SELECT MAX(order_id) FROM "order"', (), conn) or 0)
     today = now.date()
-
-    layout = {
-        "DM": [
-            ("1", "Settle tank 1", "Settle", 150_000, None), ("2", "Settle tank 2", "Settle", 150_000, None),
-            ("3", "Settle tank 3", "Settle", 150_000, None),
-            ("13", "MGR tank 13", "MGR", 60_000, None), ("14", "MGR tank 14", "MGR", 60_000, None),
-            ("20", "20's oil tank 20", "Tank", 200_000, ("01019", 60_000)),
-            ("21", "20's oil tank 21", "Tank", 200_000, ("01019", 30_000)),
-            ("32", "Process water 32", "Tank", 150_000, ("01008", 40_000)),
-            ("33", "Process water 33", "Tank", 150_000, ("01008", 20_000)),
-            ("40", "Soap in process 40", "Tank", 150_000, ("01006", 50_000)),
-            ("41", "MGR veg out 41", "Tank", 100_000, ("01007", 60_000)),
-            ("42", "MGR veg 42", "Tank", 100_000, ("01007", 25_000)),
-            ("103", "Acid tank 103", "Tank", 80_000, ("00001", 30_000)),
-            ("975", "Steam", "Utility", None, None),
-        ],
-        "SC": [
-            ("1", "Settle tank 1", "Settle", 150_000, None), ("2", "Settle tank 2", "Settle", 150_000, None),
-            ("13", "MGR tank 13", "MGR", 60_000, None),
-            ("20", "20's oil tank 20", "Tank", 200_000, ("01018", 40_000)),
-            ("32", "Process water 32", "Tank", 150_000, ("01008", 30_000)),
-            ("41", "MGR veg out 41", "Tank", 100_000, ("01007", 40_000)),
-            ("42", "MGR veg 42", "Tank", 100_000, ("01007", 20_000)),
-            ("103", "Acid tank 103", "Tank", 80_000, ("00001", 25_000)),
-            ("975", "Steam", "Utility", None, None),
-        ],
-    }
 
     def loc(plant_id: int, number: str) -> int:
         return db.scalar("SELECT location_id FROM location WHERE plant_id = ? AND number = ?", (plant_id, number), conn)
@@ -1267,8 +1374,9 @@ def _seed_acid(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> 
         recipe_id = None
         if recipe:
             recipe_id = db.scalar(
-                "SELECT recipe_id FROM blend_recipe WHERE material_id = ? AND vessel_type = ? AND active = 1",
-                (material_ids[product], recipe), conn,
+                "SELECT recipe_id FROM blend_recipe WHERE material_id = ? AND vessel_type = ? AND active = 1"
+                " AND (plant_id = ? OR plant_id IS NULL) ORDER BY plant_id IS NULL LIMIT 1",
+                (material_ids[product], recipe, plant_id), conn,
             )
         db.insert("order", {
             "order_id": order_id, "order_type_id": 2, "order_date": today.isoformat(),
@@ -1283,7 +1391,7 @@ def _seed_acid(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> 
     for plant_id, code, _name in PLANTS:
         if code not in PLANT_DEPARTMENTS["ACID"]:
             continue
-        for number, description, kind, capacity, stock in layout[code]:
+        for number, description, kind, capacity, stock in ACID_LAYOUT[code]:
             location_id = db.insert("location", {
                 "plant_id": plant_id, "number": f"{code}-{number}", "description": description,
                 "location_type_id": types[kind], "company_id": 1, "max_capacity": capacity, "bol_required": 0,
@@ -1292,13 +1400,13 @@ def _seed_acid(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> 
                 txn({"plant_id": plant_id, "transaction_type_id": 1, "to_location_id": location_id,
                      "to_material_id": material_ids[stock[0]], "to_qty": stock[1], "remarks": "Opening balance"})
 
-        oil = "01019" if code == "DM" else "01018"
-        settle_wo = work_order(plant_id, oil, 6_000.0, 1, f"SETTLE-{code}-1", "Settle")
-        work_order(plant_id, oil, 7_500.0, 3, f"SETTLE-{code}-2", "Settle")
+        oil = ACID_PLANTS[code]["oil"]
+        settle_wo = work_order(plant_id, oil, 6_000.0, 1, f"SETTLE-{code}-1", "Acid")
+        work_order(plant_id, oil, 7_500.0, 3, f"SETTLE-{code}-2", "Acid")
         if code == "DM":
-            work_order(plant_id, "01019", 5_000.0, 2, "MGR-DM-1", "MGR")
+            work_order(plant_id, oil, 5_000.0, 2, "MGR-DM-1", "MGR")
             _seed_settling_batch(conn, settle_wo, plant_id, acid_id, material_ids, user_ids, loc, txn)
-        else:
+        elif code == "SC":
             # A railcar of wetgums received for the invoice, still on the spur.
             spur = loc(plant_id, f"{code}-RECV-RAIL")
             at = (now - timedelta(hours=30)).isoformat()
@@ -1309,21 +1417,22 @@ def _seed_acid(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> 
 
 
 def _seed_settling_batch(conn, order_id, plant_id, department_id, material_ids, user_ids, loc, txn) -> None:
-    """DM settle tank 1 mid-batch: a truck of Soap - Gum unloaded into it,
-    acid and steam on top, three hours into settling — the state a day-shift
-    operator walks in to."""
+    """Des Moines batch A-00001, three hours into settling: a truck of Soap -
+    Gum cooked with acid and steam in reactor 1, then moved into settle tank
+    4 — the state a day-shift operator walks in to."""
 
     now = utc_now().replace(microsecond=0)
     started = now - timedelta(hours=7)
-    tank = loc(plant_id, "DM-1")
+    reactor, settle = loc(plant_id, "DM-1"), loc(plant_id, "DM-4")
     truck = loc(plant_id, "DM-RECV-TRUCK")
     recipe_id = db.scalar(
-        "SELECT recipe_id FROM blend_recipe WHERE material_id = ? AND vessel_type = 'Settle' AND active = 1",
-        (material_ids["01019"],), conn,
+        "SELECT recipe_id FROM blend_recipe WHERE material_id = ? AND vessel_type = 'Acid' AND active = 1"
+        " AND (plant_id = ? OR plant_id IS NULL) ORDER BY plant_id IS NULL LIMIT 1",
+        (material_ids["01019"], plant_id), conn,
     )
     db.insert("process_batch", {
         "batch_id": "A-00001", "order_id": order_id, "plant_id": plant_id, "department_id": department_id,
-        "recipe_id": recipe_id, "vessel_id": tank, "material_id": material_ids["01019"], "target_lbs": 6_000.0,
+        "recipe_id": recipe_id, "vessel_id": settle, "material_id": material_ids["01019"], "target_lbs": 6_000.0,
         "status": "settling", "started_at": started.isoformat(), "started_by": "toperator",
         "acid_at": (started + timedelta(minutes=45)).isoformat(),
         "mixing_at": (started + timedelta(minutes=70)).isoformat(),
@@ -1331,18 +1440,25 @@ def _seed_settling_batch(conn, order_id, plant_id, department_id, material_ids, 
     }, conn)
     at = lambda minutes: (started + timedelta(minutes=minutes)).isoformat()  # noqa: E731
     soap, into = material_ids["00007"], material_ids["01006"]
-    # Received off truck 5521 onto the truck bay, then pumped into the tank.
+    # Received off truck 5521 onto the truck bay, then pumped into the reactor.
     txn({"plant_id": plant_id, "transaction_type_id": 1, "to_location_id": truck, "to_material_id": soap,
          "to_qty": 44_000.0, "trailer_number": "5521", "transaction_date": at(0), "user_date": at(0)[:10],
          "remarks": "Charged to A-00001 off truck 5521", "batch_id": "A-00001"})
     for material, source, lbs, minutes in (("00007", truck, 44_000.0, 5),
-                                           ("00001", loc(plant_id, "DM-103"), 2_244.0, 50),
-                                           ("00004", loc(plant_id, "DM-975"), 1_144.0, 55)):
+                                           ("00001", loc(plant_id, "DM-103"), 2_288.0, 50),
+                                           ("00004", loc(plant_id, "DM-975"), 1_056.0, 55)):
         txn({"plant_id": plant_id, "transaction_type_id": 2, "order_id": order_id,
              "from_location_id": source, "from_material_id": material_ids[material], "from_qty": lbs,
-             "to_location_id": tank, "to_material_id": into, "to_qty": lbs,
+             "to_location_id": reactor, "to_material_id": into, "to_qty": lbs,
              "transaction_date": at(minutes), "user_date": at(minutes)[:10],
              "remarks": "Charged to A-00001", "batch_id": "A-00001"})
+    total = 44_000.0 + 2_288.0 + 1_056.0
+    moved = (now - timedelta(hours=3)).isoformat()
+    txn({"plant_id": plant_id, "transaction_type_id": 2, "order_id": order_id,
+         "from_location_id": reactor, "from_material_id": into, "from_qty": total,
+         "to_location_id": settle, "to_material_id": into, "to_qty": total,
+         "transaction_date": moved, "user_date": moved[:10],
+         "remarks": "A-00001 moved from DM-1 to DM-4", "batch_id": "A-00001"})
     db.execute(
         "INSERT INTO number_sequence (key, next_value) VALUES ('batch-A', 2)"
         " ON CONFLICT(key) DO UPDATE SET next_value = MAX(next_value, 2)",
@@ -1402,16 +1518,21 @@ def _seed_deliveries(conn, material_ids: dict[str, int]) -> None:
 def _seed_history(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> None:
     """Six weeks of the acid department and its blended loads, for the reports.
 
-    Des Moines settles most days and reprocesses MGR weekly; Sioux City
-    settles every other day. The oil goes out as AV4000, the MGR and water as
-    FE Cattle Blend with caustic dosed to the pH, the rest of the water by the
-    trailer. Early loads have the legacy habit of posting the caustic, finding
-    the pH wrong and reversing it; the last ten days were dosed on the screen.
+    Each acid plant runs as its ledger shows: soap cooked with acid and steam
+    in a reactor, moved (Sioux City: twice) into a settle tank, broken there;
+    MGR reprocessed in its own tanks; the 20's bottoms sent back to MGR. The
+    oil goes out as AV4000, the MGR and water in the plant's own cattle
+    blends with caustic dosed to the pH, the rest of the water by the
+    trailer. Early loads have the legacy habit of posting the caustic,
+    finding the pH wrong and reversing it; the last ten days were dosed on
+    the screen.
 
     Every tank is tracked as rows are written, so nothing leaves a tank that
     does not hold it and the balances the demo opened with are what it keeps.
     Its own random stream, so the rest of the demo ledger is unchanged.
     """
+
+    from .services import blend
 
     rng = random.Random(8801)
     acid_id = next(did for did, code, _d in DEPARTMENTS if code == "ACID")
@@ -1419,9 +1540,6 @@ def _seed_history(conn, material_ids: dict[str, int], user_ids: dict[str, int]) 
     order_id = int(db.scalar('SELECT MAX(order_id) FROM "order"', (), conn) or 0)
     users = [user_ids["toperator"], user_ids["toperator"], user_ids["rprice"]]
     level: dict[tuple[int, int], float] = {}
-
-    def loc(plant_id: int, number: str) -> int | None:
-        return db.scalar("SELECT location_id FROM location WHERE plant_id = ? AND number = ?", (plant_id, number), conn)
 
     def on_hand(location_id: int, material: str) -> float:
         key = (location_id, material_ids[material])
@@ -1471,18 +1589,8 @@ def _seed_history(conn, material_ids: dict[str, int], user_ids: dict[str, int]) 
         }, conn)
         return order_id
 
-    def ship(plant_id: int, so: int, first_txn: int, product: str, lbs: float, trailer: str, at) -> None:
-        db.insert("pending_shipment", {"order_id": so, "transaction_id": first_txn, "trailer_number": trailer,
-                                       "quantity": lbs, "shipped": 1}, conn)
-        txn({"transaction_type_id": 5, "parent_transaction_id": first_txn, "order_id": so, "plant_id": plant_id,
-             "from_material_id": material_ids[product], "from_location_id": loc(plant_id, f"{code}-TRAILER"),
-             "from_qty": lbs, "trailer_number": trailer, "remarks": "Shipped"}, at + timedelta(hours=1))
-
-    def qc(so: int, bol: str, at, ph: float | None, moisture: float | None = None) -> None:
-        db.insert("qc", {"order_id": so, "bol_number": bol, "test_date": at.isoformat(), "performed_by": "rprice",
-                         "moisture": moisture, "ph": ph, "sample_number": f"{code}C{rng.randrange(1000, 9999)}D{at:%y%m%d}",
-                         "seal_number": str(rng.randrange(100_000, 999_999)),
-                         "date_added": at.isoformat(), "added_by": "rprice"}, conn)
+    def po_ref() -> str:
+        return f"P01-0{rng.randrange(21_000, 21_999)}-{rng.randrange(1, 90)}"
 
     cattle_dept = db.scalar(
         "SELECT mt.department_id FROM material m JOIN material_type mt ON mt.material_type_id = m.material_type_id"
@@ -1492,34 +1600,60 @@ def _seed_history(conn, material_ids: dict[str, int], user_ids: dict[str, int]) 
     for plant_id, code, _name in PLANTS:
         if code not in PLANT_DEPARTMENTS["ACID"]:
             continue
-        dm = code == "DM"
-        oil = "01019" if dm else "01018"
-        settles = [loc(plant_id, f"{code}-{n}") for n in (("2", "3") if dm else ("1", "2"))]
-        oil_tanks = [loc(plant_id, f"{code}-{n}") for n in (("20", "21") if dm else ("20",))]
-        water_tanks = [loc(plant_id, f"{code}-{n}") for n in (("32", "33") if dm else ("32",))]
-        mgr_out, mgr_back = loc(plant_id, f"{code}-41"), loc(plant_id, f"{code}-42")
-        reactor = loc(plant_id, f"{code}-13")
-        acid_tank, steam = loc(plant_id, f"{code}-103"), loc(plant_id, f"{code}-975")
-        truck, trailer_loc = loc(plant_id, f"{code}-RECV-TRUCK"), loc(plant_id, f"{code}-TRAILER")
-        caustic_tank = db.scalar(
-            """SELECT l.location_id FROM location l JOIN inventory_transaction t ON t.to_location_id = l.location_id
-               WHERE l.plant_id = ? AND t.to_material_id = ? AND l.location_type_id = 1
-               GROUP BY l.location_id ORDER BY SUM(t.to_qty) DESC LIMIT 1""",
-            (plant_id, material_ids["00003"]), conn,
-        )
-        mgr_store = db.scalar(
-            """SELECT l.location_id FROM location l JOIN inventory_transaction t ON t.to_location_id = l.location_id
-               WHERE l.plant_id = ? AND t.to_material_id = ? AND l.location_type_id = 1 AND l.number LIKE ?
-               GROUP BY l.location_id ORDER BY SUM(t.to_qty) DESC LIMIT 1""",
-            (plant_id, material_ids["01007"], f"{code}-T%"), conn,
-        ) or mgr_back
+        cfg = ACID_PLANTS[code]
+        oil = cfg["oil"]
+
+        def loc(number: str | None) -> int | None:
+            if number is None:
+                return None
+            return db.scalar("SELECT location_id FROM location WHERE plant_id = ? AND number = ?",
+                             (plant_id, f"{code}-{number}"), conn)
+
+        reactors = [loc(n) for n in cfg["reactors"]]
+        via = [loc(n) for n in cfg["via"]]
+        settles = [loc(n) for n in cfg["settles"]]
+        mgr_vessels = [loc(n) for n in cfg["mgr_vessels"]]
+        oil_tanks = [loc(n) for n in cfg["oil_tanks"]]
+        water_tanks = [loc(n) for n in cfg["water_tanks"]]
+        mgr_out, mgr_back, mgr_store = loc(cfg["mgr_out"]), loc(cfg["mgr_back"]), loc(cfg["mgr_store"])
+        animal, acid_tank, caustic_tank = loc(cfg["animal"]), loc(cfg["acid"]), loc(cfg["caustic"])
+        steam, truck, trailer_loc = loc("975"), loc("RECV-TRUCK"), loc("TRAILER")
         floor = {key: on_hand(*key) for key in
                  [(t, oil) for t in oil_tanks] + [(t, "01008") for t in water_tanks] + [(mgr_out, "01007")]}
         week_orders: dict[int, tuple[int, int]] = {}
         acid_this_week = 0.0
+        batch_no = 0
 
         def over(tank: int, material: str) -> float:
             return on_hand(tank, material) - floor[(tank, material)]
+
+        def fill(tanks: list[int], material: str, lbs: float) -> int:
+            """The fullest tank with room: oil is built up to a truckload, not spread thin."""
+            room = [t for t in tanks if on_hand(t, material) + lbs <= 190_000]
+            return max(room or tanks, key=lambda t: on_hand(t, material))
+
+        def ship(so: int, first_txn: int, product: str, lbs: float, trailer: str, at) -> None:
+            db.insert("pending_shipment", {"order_id": so, "transaction_id": first_txn, "trailer_number": trailer,
+                                           "quantity": lbs, "shipped": 1}, conn)
+            txn({"transaction_type_id": 5, "parent_transaction_id": first_txn, "order_id": so, "plant_id": plant_id,
+                 "from_material_id": material_ids[product], "from_location_id": trailer_loc,
+                 "from_qty": lbs, "trailer_number": trailer, "remarks": "Shipped"}, at + timedelta(hours=1))
+
+        def qc(so: int, bol: str, at, ph: float | None, moisture: float | None = None) -> None:
+            db.insert("qc", {"order_id": so, "bol_number": bol, "test_date": at.isoformat(), "performed_by": "rprice",
+                             "moisture": moisture, "ph": ph, "sample_number": f"{code}C{rng.randrange(1000, 9999)}D{at:%y%m%d}",
+                             "seal_number": str(rng.randrange(100_000, 999_999)),
+                             "date_added": at.isoformat(), "added_by": "rprice"}, conn)
+
+        def top_up(tank: int, material: str, need: float, at) -> None:
+            """An inbound truck of what the blend needs, before it runs short."""
+            if on_hand(tank, material) >= need + 5_000:
+                return
+            lbs = round(rng.uniform(44_000, 46_000))
+            po = order(plant_id, 3, material, lbs, at, po_ref(), None)
+            txn({"transaction_type_id": 1, "order_id": po, "plant_id": plant_id, "to_location_id": tank,
+                 "to_material_id": material_ids[material], "to_qty": lbs, "department_id": None,
+                 "trailer_number": str(rng.randrange(100, 999))}, at - timedelta(hours=4))
 
         for days_ago in range(42, 1, -1):
             day = now - timedelta(days=days_ago)
@@ -1528,18 +1662,18 @@ def _seed_history(conn, material_ids: dict[str, int], user_ids: dict[str, int]) 
                 start = day.replace(hour=6)
                 week_orders[week] = (
                     order(plant_id, 2, oil, 0.0, start, f"SETTLE-{code}-W{day:%V}"),
-                    order(plant_id, 3, "00007", 0.0, start, f"P01-0{rng.randrange(21_000, 21_999)}-{rng.randrange(1, 90)}"),
+                    order(plant_id, 3, "00007", 0.0, start, po_ref()),
                 )
                 if acid_this_week:
-                    ro = order(plant_id, 3, "00001", acid_this_week, start, f"P01-0{rng.randrange(21_000, 21_999)}-1")
+                    ro = order(plant_id, 3, "00001", acid_this_week, start, po_ref())
                     txn({"transaction_type_id": 1, "order_id": ro, "plant_id": plant_id, "to_location_id": acid_tank,
                          "to_material_id": material_ids["00001"], "to_qty": round(acid_this_week), "remarks": "Acid delivery"},
                         start)
                     acid_this_week = 0.0
             wo, po = week_orders[week]
-            settle_today = (rng.random() < 0.86) if dm else (days_ago % 2 == 0)
-            if settle_today:
-                tank = settles[days_ago % len(settles)]
+            if rng.random() < cfg["settles_a_day"]:
+                batch_no += 1
+                reactor = reactors[batch_no % len(reactors)]
                 t0 = day.replace(hour=rng.choice((5, 6, 7, 8)))
                 soap_mat = rng.choice(("00007", "00007", "00010", "00006"))
                 soap = round(rng.uniform(38_000, 48_000), -1)
@@ -1547,30 +1681,40 @@ def _seed_history(conn, material_ids: dict[str, int], user_ids: dict[str, int]) 
                 txn({"transaction_type_id": 1, "order_id": po, "plant_id": plant_id, "to_location_id": truck,
                      "to_material_id": material_ids[soap_mat], "to_qty": soap, "trailer_number": truck_no,
                      "to_bol": f"P01-0{rng.randrange(21_000, 21_999)}({truck_no})"}, t0)
-                inputs = [(soap_mat, truck, soap, 5)]
-                acid = round(soap * rng.uniform(0.045, 0.058))
+                acid = round(soap * cfg["acid_per"] / 100 * rng.uniform(0.88, 1.12))
                 acid_this_week += acid
-                inputs.append(("00001", acid_tank, acid, 50))
-                inputs.append(("00004", steam, round(soap * rng.uniform(0.02, 0.034)), 55))
-                if rng.random() < 0.5 and on_hand(water_tanks[0], "01008") > 12_000:
-                    inputs.append(("01008", water_tanks[0], round(rng.uniform(3_000, 7_000)), 20))
+                inputs = [(soap_mat, truck, soap, 5), ("00001", acid_tank, acid, 50)]
+                steam_lbs = round(soap * cfg["steam_per"] / 100 * rng.uniform(0.8, 1.2))
+                if steam_lbs > 50:
+                    inputs.append(("00004", steam, steam_lbs, 55))
+                water_tank = max(water_tanks, key=lambda t: on_hand(t, "01008"))
+                if rng.random() < 0.8 and on_hand(water_tank, "01008") > 12_000:
+                    inputs.append(("01008", water_tank, round(rng.uniform(2_000, 7_000)), 20))
                 for material, source, lbs, minutes in inputs:
                     txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": source,
-                         "from_material_id": material_ids[material], "from_qty": lbs, "to_location_id": tank,
+                         "from_material_id": material_ids[material], "from_qty": lbs, "to_location_id": reactor,
                          "to_material_id": material_ids["01006"], "to_qty": lbs, "remarks": "Charged to settle"},
                         t0 + timedelta(minutes=minutes))
                 total_in = sum(i[2] for i in inputs)
-                fpy = min(max(rng.gauss(0.55, 0.05), 0.42), 0.66)
+                # Cooked, then moved on — at Sioux City through a cooker first.
+                here, at = reactor, t0 + timedelta(minutes=90)
+                for nxt in ([rng.choice(via)] if via else []) + [settles[batch_no % len(settles)]]:
+                    txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": here,
+                         "from_material_id": material_ids["01006"], "from_qty": total_in, "to_location_id": nxt,
+                         "to_material_id": material_ids["01006"], "to_qty": total_in,
+                         "remarks": "Moved to settle"}, at)
+                    here, at = nxt, at + timedelta(minutes=80)
+                fpy = min(max(rng.gauss(cfg["fpy"], 0.05), 0.4), 0.8)
                 oil_lbs = round(soap * 0.26 * fpy)
-                mgr_lbs = round(total_in * rng.uniform(0.21, 0.28))
-                t1 = t0 + timedelta(hours=rng.choice((9, 10, 11)))
-                oil_tank = min(oil_tanks, key=lambda t: on_hand(t, oil))
+                mgr_lbs = round(total_in * rng.uniform(cfg["mgr_split"] - 0.04, cfg["mgr_split"] + 0.04))
+                t1 = t0 + timedelta(hours=rng.choice((10, 11, 12)))
+                oil_tank = fill(oil_tanks, oil, oil_lbs)
                 water_tank = min(water_tanks, key=lambda t: on_hand(t, "01008"))
                 moisture, spin = round(rng.uniform(1.4, 3.4), 2), rng.choice((0.1, 0.2, 0.2, 0.3))
                 for material, dest, lbs, remarks in ((oil, oil_tank, oil_lbs, f"M={moisture} S={spin}"),
                                                      ("01007", mgr_out, mgr_lbs, f"M={round(rng.uniform(3, 8), 2)} S=0.3"),
                                                      ("01008", water_tank, total_in - oil_lbs - mgr_lbs, "")):
-                    tid = txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": tank,
+                    tid = txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": here,
                                "from_material_id": material_ids["01006"], "from_qty": lbs, "to_location_id": dest,
                                "to_material_id": material_ids[material], "to_qty": lbs, "remarks": remarks}, t1)
                     if material == oil:
@@ -1581,23 +1725,24 @@ def _seed_history(conn, material_ids: dict[str, int], user_ids: dict[str, int]) 
 
             # Every few days the MGR is reprocessed; weekly the 20's bottoms go back to it.
             t0 = day.replace(hour=13)
-            if days_ago % (3 if dm else 6) == 0 and reactor:
+            if days_ago % cfg["reprocess_every"] == 0:
+                reactor = mgr_vessels[days_ago % len(mgr_vessels)]
                 # What the settles and bottoms added since, not the tank's opening stock.
-                batch = round(min(over(mgr_out, "01007"), rng.uniform(32_000, 40_000)), -1)
+                batch = round(min(over(mgr_out, "01007"), rng.uniform(40_000, 56_000)), -1)
                 if batch > 10_000:
                     txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": mgr_out,
                          "from_material_id": material_ids["01007"], "from_qty": batch, "to_location_id": reactor,
                          "to_material_id": material_ids["01007"], "to_qty": batch, "remarks": "MGR to reprocess"}, t0)
                     oil_lbs = round(batch * rng.uniform(0.30, 0.38))
                     back = round(batch * rng.uniform(0.25, 0.35))
-                    for material, dest, lbs in ((oil, oil_tanks[-1], oil_lbs), ("01007", mgr_back, back),
+                    for material, dest, lbs in ((oil, fill(oil_tanks, oil, oil_lbs), oil_lbs), ("01007", mgr_back, back),
                                                 ("01008", water_tanks[-1], batch - oil_lbs - back)):
                         txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": reactor,
                              "from_material_id": material_ids["01007"], "from_qty": lbs, "to_location_id": dest,
                              "to_material_id": material_ids[material], "to_qty": lbs, "remarks": "MGR break"},
                             t0 + timedelta(hours=8))
             if days_ago % 7 == 3:
-                bottoms = round(rng.uniform(7_000, 12_000) * (1 if dm else 0.5))
+                bottoms = round(rng.uniform(7_000, 12_000) * cfg["settles_a_day"])
                 if on_hand(oil_tanks[0], oil) > bottoms + 10_000:
                     txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": oil_tanks[0],
                          "from_material_id": material_ids[oil], "from_qty": bottoms, "to_location_id": mgr_out,
@@ -1617,54 +1762,66 @@ def _seed_history(conn, material_ids: dict[str, int], user_ids: dict[str, int]) 
                                  "to_material_id": material_ids["05065"], "to_qty": lbs, "to_bol": bol,
                                  "trailer_number": trailer, "department_id": None}, t_out)
                     qc(so, bol, t_out, None, round(rng.uniform(1.1, 1.6), 2))
-                    ship(plant_id, so, first, "05065", lbs, trailer, t_out)
-            # A cattle blend most days: MGR off the break if there is a load of
-            # it, otherwise from storage (topped up by the inbound MGR trucks).
-            for _load in range(1 if rng.random() < (0.85 if dm else 0.5) else 0):
-                if not caustic_tank:
-                    break
-                product = rng.choice(("01021", "01021", "01020"))
+                    ship(so, first, "05065", lbs, trailer, t_out)
+            # A cattle blend most days, by this plant's own recipe.
+            if caustic_tank and rng.random() < cfg["load_chance"]:
+                product = rng.choice(cfg["loads"])
+                recipe = blend.recipe_for_material(material_ids[product], conn, method="blend", plant_id=plant_id)
                 total = round(rng.uniform(44_000, 46_500))
-                mgr_share, caustic_share = (0.542, 0.047) if product == "01021" else (0.57, 0.025)
-                mgr_lbs, caustic_lbs = round(total * mgr_share), round(total * caustic_share * rng.uniform(0.85, 1.15))
+                parts = {c["material_number"]: total * c["percentage"] / 100 for c in recipe["components"]}
+                caustic_lbs = round(parts.get("00003", 0) * rng.uniform(0.85, 1.15))
                 water_tank = max(water_tanks, key=lambda t: on_hand(t, "01008"))
-                water_lbs = total - mgr_lbs - caustic_lbs
-                if on_hand(water_tank, "01008") < water_lbs + 2_000:
-                    break
-                mgr_from = mgr_back if on_hand(mgr_back, "01007") >= mgr_lbs + 2_000 else mgr_store
-                if on_hand(mgr_from, "01007") < mgr_lbs + 20_000:
-                    lbs = round(rng.uniform(44_000, 46_000))
-                    po_mgr = order(plant_id, 3, "01007", lbs, t_out, f"P01-0{rng.randrange(21_000, 21_999)}-{rng.randrange(1, 90)}", None)
-                    txn({"transaction_type_id": 1, "order_id": po_mgr, "plant_id": plant_id, "to_location_id": mgr_from,
-                         "to_material_id": material_ids["01007"], "to_qty": lbs, "department_id": None,
-                         "trailer_number": str(rng.randrange(100, 999))}, t_out - timedelta(hours=4))
-                trailer = str(rng.randrange(100, 999))
-                so = order(plant_id, 1, product, total, t_out, f"O01-1{rng.randrange(10_000, 19_999)}-1", cattle_dept)
-                bol = f"001-{rng.randrange(111_000, 118_999)}-1({trailer})"
-                base = {"transaction_type_id": 8, "order_id": so, "plant_id": plant_id, "to_location_id": trailer_loc,
-                        "to_material_id": material_ids[product], "to_bol": bol, "trailer_number": trailer,
-                        "department_id": cattle_dept}
-                first = txn({**base, "from_location_id": mgr_from, "from_material_id": material_ids["01007"],
-                             "from_qty": mgr_lbs, "to_qty": mgr_lbs}, t_out)
-                txn({**base, "from_location_id": water_tank, "from_material_id": material_ids["01008"],
-                     "from_qty": water_lbs, "to_qty": water_lbs}, t_out + timedelta(minutes=10))
-                dosed_here = days_ago <= 10
-                ph = round(min(max(rng.gauss(3.2, 0.5 if dosed_here else 0.8), 1.6), 6.2), 2)
-                if not dosed_here and rng.random() < (0.35 if not dm else 0.18):
-                    # Posted, tested, wrong: reversed and posted again.
-                    wrong = round(caustic_lbs * rng.uniform(0.5, 0.9))
-                    bad = txn({**base, "from_location_id": caustic_tank, "from_material_id": material_ids["00003"],
-                               "from_qty": wrong, "to_qty": wrong}, t_out + timedelta(minutes=20))
-                    reverse(bad, t_out + timedelta(minutes=40), "pH high, re-dosing")
-                cid = txn({**base, "from_location_id": caustic_tank, "from_material_id": material_ids["00003"],
-                           "from_qty": caustic_lbs, "to_qty": caustic_lbs,
-                           "remarks": f"Dosed to ph: +{caustic_lbs:,} lbs -> ph {ph}" if dosed_here else ""},
-                          t_out + timedelta(minutes=50))
-                if dosed_here:
-                    db.insert("txn_reading", {"transaction_id": cid, "analyte": "ph", "value": ph, "source": "entered"}, conn)
-                # About one load in six went out untested.
-                qc(so, bol, t_out + timedelta(minutes=55), ph if dosed_here or rng.random() > 0.17 else None)
-                ship(plant_id, so, first, product, total, trailer, t_out)
+                sources: list[tuple[str, int, float]] = []
+                for number, lbs in parts.items():
+                    lbs = round(lbs) if number != "00003" else caustic_lbs
+                    if number == "01007":
+                        tank = mgr_back if on_hand(mgr_back, "01007") >= lbs + 2_000 else mgr_store
+                        top_up(tank, "01007", lbs, t_out)
+                    elif number == "01003":
+                        tank = animal
+                        if tank is None:
+                            continue
+                        top_up(tank, "01003", lbs, t_out)
+                    elif number == "01008":
+                        tank = water_tank
+                    elif number == "00003":
+                        tank = caustic_tank
+                        top_up(tank, "00003", lbs, t_out)
+                    else:
+                        continue
+                    sources.append((number, tank, lbs))
+                water_need = sum(lbs for n, _t, lbs in sources if n == "01008")
+                if on_hand(water_tank, "01008") >= water_need + 2_000:
+                    trailer = str(rng.randrange(100, 999))
+                    so = order(plant_id, 1, product, total, t_out, f"O01-1{rng.randrange(10_000, 19_999)}-1", cattle_dept)
+                    bol = f"001-{rng.randrange(111_000, 118_999)}-1({trailer})"
+                    base = {"transaction_type_id": 8, "order_id": so, "plant_id": plant_id, "to_location_id": trailer_loc,
+                            "to_material_id": material_ids[product], "to_bol": bol, "trailer_number": trailer,
+                            "department_id": cattle_dept}
+                    dosed_here = days_ago <= 10
+                    ph = round(min(max(rng.gauss(3.2, 0.5 if dosed_here else 0.8), 1.6), 6.2), 2)
+                    first = None
+                    loaded = 0.0
+                    for minutes, (number, tank, lbs) in enumerate(sources):
+                        at = t_out + timedelta(minutes=10 * minutes)
+                        if number == "00003" and not dosed_here and rng.random() < (0.18 if code == "DM" else 0.3):
+                            # Posted, tested, wrong: reversed and posted again.
+                            wrong = round(lbs * rng.uniform(0.5, 0.9))
+                            bad = txn({**base, "from_location_id": tank, "from_material_id": material_ids[number],
+                                       "from_qty": wrong, "to_qty": wrong}, at)
+                            reverse(bad, at + timedelta(minutes=5), "pH high, re-dosing")
+                        tid = txn({**base, "from_location_id": tank, "from_material_id": material_ids[number],
+                                   "from_qty": lbs, "to_qty": lbs,
+                                   "remarks": f"Dosed to ph: +{lbs:,} lbs -> ph {ph}" if number == "00003" and dosed_here else ""},
+                                  at + timedelta(minutes=6))
+                        if number == "00003" and dosed_here:
+                            db.insert("txn_reading", {"transaction_id": tid, "analyte": "ph", "value": ph,
+                                                      "source": "entered"}, conn)
+                        first = first or tid
+                        loaded += lbs
+                    # About one load in six went out untested.
+                    qc(so, bol, t_out + timedelta(minutes=55), ph if dosed_here or rng.random() > 0.17 else None)
+                    ship(so, first, product, loaded, trailer, t_out)
             for tank in water_tanks:
                 while over(tank, "01008") >= 46_000:
                     lbs = round(rng.uniform(45_500, 46_700))
@@ -1675,7 +1832,7 @@ def _seed_history(conn, material_ids: dict[str, int], user_ids: dict[str, int]) 
                                  "from_material_id": material_ids["01008"], "from_qty": lbs, "to_location_id": trailer_loc,
                                  "to_material_id": material_ids["01008"], "to_qty": lbs, "to_bol": bol,
                                  "trailer_number": trailer}, t_out + timedelta(hours=1))
-                    ship(plant_id, so, first, "01008", lbs, trailer, t_out + timedelta(hours=1))
+                    ship(so, first, "01008", lbs, trailer, t_out + timedelta(hours=1))
 
         # The week's work orders and receipts carry what they did.
         for wo, po in week_orders.values():

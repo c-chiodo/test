@@ -151,7 +151,7 @@ Three invariants are enforced in `post()` rather than left to the screens:
 | — | **Today** | New: the operator's home — every truck to load, batch to blend and trailer to ship at the plant, one button each, the scan box, and the tanks |
 | — | **Load & ship** | New: one page in three parts — check & load, test & seal, ship — pre-filled, and resumable after a sign-out |
 | Department (per plant, on orders, transactions and material types) | **The department picker on Today**, and a batch screen per department | A terminal is set to its department once; Today, the tanks and the pop-out board then show that department's work only |
-| — | **Acid** | Acidulation as it happens: soap in (from a tank, or straight off a truck or railcar), acid in, cook & mix, settle, draw off — one page per batch with the clock, any terminal can pick it up, the yield measured at draw-off |
+| — | **Acid** (Des Moines, Sioux City, Pleasant Hill) | Soap cooked with acid in a reactor, moved on to a settle tank and broken there — each plant's tanks by its own numbering, each plant's own acid and steam ratios. Acidulation as it happens: soap in (from a tank, or straight off a truck or railcar), acid in, cook & mix, settle, draw off — one page per batch with the clock, any terminal can pick it up, the yield measured at draw-off |
 | — | **Tank board** | New: pop the tank levels out onto a second monitor or a wall screen; live, read-only, no sign-in on that screen |
 | Blend (via `Blend_recipe_id`) | **Blend** | Recipes as data; pick the work order, the batch arrives scaled with tanks chosen, one button posts it whole |
 | — | Kiosk mode | New: PIN sign-in, touch layout and idle sign-out for a shared plant terminal |
@@ -288,7 +288,9 @@ Blend is MGR veg, process water and caustic, each from its own tank. The
 legacy PIMS records these as PROD-LOAD rows and the caustic, which goes in
 against the pH, as one posting per attempt — so a load that overshot was
 reversed and re-posted (13.6% of PROD-LOAD rows in June–August 2026).
-**Load & ship** keeps the attempts on the screen — add caustic, type the pH,
+Each plant blends by its own recipe — FE Cattle Blend 2.5 is mostly MGR veg
+and MGR animal at Des Moines, MGR veg and process water at Sioux City — measured
+from its PROD-LOAD rows. **Load & ship** keeps the attempts on the screen — add caustic, type the pH,
 add more — and posts the truck once: one PROD_LOAD row per component, one
 BOL, one staged shipment, the dosing log in the remarks, and the last pH as a
 reading the QC form starts from (`pims/services/loadblend.py`).

@@ -180,7 +180,14 @@ def progress(order_id: int, order_type_id: int, conn=None) -> dict[str, Any]:
         SELECT COALESCE(SUM(t.from_qty), 0)
         FROM inventory_transaction t
         JOIN transaction_type tt ON tt.transaction_type_id = t.transaction_type_id
-        WHERE t.order_id = ? AND t.voided = 0 AND t.is_reversal = 0 AND tt.kind = 'SHIP'
+        LEFT JOIN inventory_transaction p ON p.transaction_id = t.parent_transaction_id
+        LEFT JOIN transaction_type pt ON pt.transaction_type_id = p.transaction_type_id
+        WHERE t.order_id = ? AND t.voided = 0 AND t.is_reversal = 0
+          -- A shipment, or a correction to one. The legacy PIMS corrects a
+          -- SHIP-LEAVE with a SHIPADJ and a second SHIP-LEAVE, both children
+          -- of the first and equal and opposite; counting only the SHIP rows
+          -- would count the correction as more product shipped.
+          AND (tt.kind = 'SHIP' OR (tt.kind = 'ADJUST' AND pt.kind = 'SHIP'))
         """,
         (order_id,),
         conn,

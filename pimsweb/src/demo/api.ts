@@ -750,7 +750,12 @@ function progress(order: Row): Row {
         fulfilled += txn.to_qty
       }
     }
+    // A shipment, or a legacy correction to one (SHIPADJ under a SHIP-LEAVE).
     if (code === 'SHIP') shipped += txn.from_qty
+    else if (code === 'ADJUST' && txn.parent_transaction_id) {
+      const parent = store.inventory_transaction.find((p) => p.transaction_id === txn.parent_transaction_id)
+      if (parent && kindOf(parent.transaction_type_id) === 'SHIP') shipped += txn.from_qty
+    }
   }
   const ordered = order.material_one_quantity || 0
   const remaining = Math.round((ordered - fulfilled) * 100) / 100
@@ -1385,6 +1390,8 @@ function departmentsForPlant(plantId: number): Row[] {
     if (!vessels.has(r.department_id)) vessels.set(r.department_id, new Set())
     if (!methods.has(r.department_id)) methods.set(r.department_id, new Set())
     vessels.get(r.department_id)!.add(r.vessel_type || 'Blend')
+    // A staged batch moves on through reactor, settle and MGR tanks.
+    if (r.method === 'staged') for (const v of VESSEL_TYPES) vessels.get(r.department_id)!.add(v)
     methods.get(r.department_id)!.add(r.method || 'blend')
   }
   return store.department
@@ -1466,8 +1473,9 @@ export function tankBoard(plantId: number, departmentId: number | null = null): 
     const d = byId.department().get(departmentId)
     department = d ? { department_id: d.department_id, code: d.code, description: d.description } : null
     const handled = departmentMaterials(departmentId, plantId)
-    const vessels = new Set(store.blend_recipe
-      .filter((r) => r.active && r.department_id === departmentId).map((r) => r.vessel_type))
+    const recipes = store.blend_recipe.filter((r) => r.active && r.department_id === departmentId)
+    const vessels = new Set(recipes.map((r) => r.vessel_type))
+    if (recipes.some((r) => r.method === 'staged')) for (const v of VESSEL_TYPES) vessels.add(v)
     const materialByNumber = new Map(store.material.map((m) => [m.number, m.material_id]))
     shown = tanks.filter((t) => vessels.has(t.kind)
       || t.products.some((p: Row) => p.lbs > 0.5 && handled.has(materialByNumber.get(p.number))))
@@ -1508,12 +1516,17 @@ function recipeOutputs(recipeId: number): Row[] {
 }
 
 /** blend.recipe_for_material: one per product per vessel; blend first. */
-function recipeForMaterial(materialId: number, method: string | null = null, recipeId: number | null = null): Row | null {
+function recipeForMaterial(materialId: number, method: string | null = null, recipeId: number | null = null,
+  plantId: number | null = null): Row | null {
+  // The plant's own recipe first; asked for no plant, the every-plant one.
+  const rank = (r: Row) => (plantId ? (r.plant_id ? 0 : 1) : (r.plant_id ? 1 : 0))
   const recipe = recipeId
     ? store.blend_recipe.find((r) => r.recipe_id === recipeId)
     : store.blend_recipe
-      .filter((r) => r.material_id === materialId && r.active && (!method || (r.method || 'blend') === method))
-      .sort((a, b) => Number((b.method || 'blend') === 'blend') - Number((a.method || 'blend') === 'blend') || a.recipe_id - b.recipe_id)[0]
+      .filter((r) => r.material_id === materialId && r.active && (!method || (r.method || 'blend') === method)
+        && (!plantId || !r.plant_id || r.plant_id === plantId))
+      .sort((a, b) => rank(a) - rank(b)
+        || Number((b.method || 'blend') === 'blend') - Number((a.method || 'blend') === 'blend') || a.recipe_id - b.recipe_id)[0]
   if (!recipe) return null
   return { ...recipe, components: recipeComponents(recipe.recipe_id), outputs: recipeOutputs(recipe.recipe_id) }
 }
@@ -1542,7 +1555,7 @@ function blendPlan(params: Row): Row {
   }
   if (!materialId) invalid('Say what product to blend.', { material_id: 'Choose a product.' })
   const material = byId.material().get(materialId!)!
-  const recipe = recipeForMaterial(materialId!)
+  const recipe = recipeForMaterial(materialId!, null, null, plantId)
   if (!recipe) {
     refuse(
       `No recipe is set up for ${material.number} ${material.description}. `
@@ -1669,7 +1682,7 @@ function blendExecute(payload: Row): Row {
   if (Object.keys(fields).length) invalid('This batch cannot be blended.', fields)
 
   // The recipe, not the client, decides the yield.
-  const recipe = recipeForMaterial(materialId)
+  const recipe = recipeForMaterial(materialId, null, null, byId.location().get(Number(payload.to_location_id))?.plant_id ?? null)
   if (recipe?.method === 'staged') {
     refuse('This product is made in stages — charged, settled and drawn off — not blended in one go. '
       + "Run it from its department's screen.", { rule: 'staged_recipe' })
@@ -1795,7 +1808,7 @@ function loadBlendPlan(orderId: number, quantity: number | null): Row | null {
   requireUser()
   const order = byId.order().get(orderId)
   if (!order) return notFound(`Order ${orderId} was not found.`)
-  const recipe = recipeForMaterial(order.material_one_id, 'blend')
+  const recipe = recipeForMaterial(order.material_one_id, 'blend', null, order.plant_id)
   if (!recipe || !recipe.components.length) return null
   if (recipe.components.length === 1 && recipe.components[0].material_id === order.material_one_id) return null
   const remaining = round2(Math.max(order.material_one_quantity - progress(order).qty_fulfilled, 0))
@@ -1967,9 +1980,36 @@ function batchRecipe(batch: Row): Row | null {
   return batch.recipe_id ? recipeForMaterial(batch.material_id, null, batch.recipe_id) : null
 }
 
+/** Where a batch can be: reactor, settle tank, MGR tank. */
+const VESSEL_TYPES = ['Acid', 'Settle', 'MGR']
+
+/** The rows that put something into the batch. With a process material the
+ *  batch may have moved tank to tank; a move is not a charge. */
 function batchCharges(batch: Row): Row[] {
-  return store.inventory_transaction.filter((t) => t.batch_id === batch.batch_id
-    && t.to_location_id === batch.vessel_id && !t.voided && !t.is_reversal)
+  const processMaterial = batchRecipe(batch)?.process_material_id
+  if (!processMaterial) {
+    return store.inventory_transaction.filter((t) => t.batch_id === batch.batch_id
+      && t.to_location_id === batch.vessel_id && !t.voided && !t.is_reversal)
+  }
+  const rows = batchProcessRows(batch, processMaterial)
+  const beenIn = new Set(rows.map((t) => t.to_location_id))
+  return rows.filter((t) => !(t.from_material_id === processMaterial && beenIn.has(t.from_location_id)))
+}
+
+function batchProcessRows(batch: Row, processMaterial: number): Row[] {
+  return store.inventory_transaction.filter((t) => t.batch_id === batch.batch_id && t.to_material_id === processMaterial
+    && !t.voided && !t.is_reversal).sort((a, b) => a.transaction_id - b.transaction_id)
+}
+
+function batchMoves(batch: Row): Row[] {
+  const processMaterial = batchRecipe(batch)?.process_material_id
+  if (!processMaterial) return []
+  const rows = batchProcessRows(batch, processMaterial)
+  const beenIn = new Set(rows.map((t) => t.to_location_id))
+  const locations = byId.location()
+  return rows.filter((t) => t.from_material_id === processMaterial && beenIn.has(t.from_location_id))
+    .map((t) => ({ transaction_id: t.transaction_id, from: locations.get(t.from_location_id)?.number,
+      to: locations.get(t.to_location_id)?.number, lbs: t.to_qty, at: t.transaction_date }))
 }
 
 /** Pounds of each ingredient in — from the ingredient side when the tank
@@ -2065,7 +2105,9 @@ function processGet(batchId: string): Row {
       })
     }
   }
-  const outRows = rows.filter((r) => r.from_location_id === batch.vessel_id && !r.voided && !r.is_reversal)
+  const processMaterial = recipe?.process_material_id
+  const outRows = rows.filter((r) => r.from_location_id === batch.vessel_id && !r.voided && !r.is_reversal
+    && !(processMaterial && r.to_material_id === processMaterial))
   const outputs = ((recipe?.outputs ?? []) as Row[]).map((o): Row => {
     const mine = outRows.filter((r) => r.to_material_id === o.material_id)
     return {
@@ -2100,6 +2142,8 @@ function processGet(batchId: string): Row {
       ? Math.round((Date.now() - new Date(since).getTime()) / 6000) / 10 : null,
     stage_since: since,
     vessel: vessel ? { location_id: vessel.location_id, number: vessel.number, description: vessel.description, max_capacity: vessel.max_capacity } : null,
+    moves: batchMoves(batch),
+    can_move: Boolean(processMaterial) && OPEN_STAGES.includes(batch.status) && totalIn > 0,
     product: materials.get(batch.material_id) ?? null,
     process_material: recipe?.process_material_id ? materials.get(recipe.process_material_id) ?? null : null,
     recipe: recipe ? {
@@ -2132,6 +2176,8 @@ function processVessels(plantId: number, departmentId: number | null = null): Ro
   const types = new Set(store.blend_recipe
     .filter((r) => r.active && r.method === 'staged' && (!departmentId || r.department_id === departmentId))
     .map((r) => r.vessel_type))
+  if (!types.size) return []
+  for (const v of VESSEL_TYPES) types.add(v)
   const typeName = new Map(store.location_type.map((t) => [t.location_type_id, t.name]))
   const busy = new Map(openProcessBatches(plantId).map((b) => [b.vessel_id, b]))
   return store.location
@@ -2171,7 +2217,7 @@ function processStart(payload: Row): Row {
   const order = byId.order().get(Number(payload.order_id))
   if (!order) return notFound(`Order ${payload.order_id} was not found.`)
   requirePlant(user, order.plant_id)
-  const recipe = recipeForMaterial(order.material_one_id, 'staged', order.recipe_id ?? null)
+  const recipe = recipeForMaterial(order.material_one_id, 'staged', order.recipe_id ?? null, order.plant_id)
   if (!recipe || recipe.method !== 'staged') {
     refuse(`Order ${order.order_id} is not made in stages — run it on the Blend screen.`, { rule: 'not_staged' })
   }
@@ -2272,6 +2318,43 @@ function processCharge(batchId: string, payload: Row): Row {
     to_location_id: batch.vessel_id, to_material_id: into, to_qty: quantity,
   })
   tagBatch(txn, batchId)
+  return processGet(batchId)
+}
+
+function processMove(batchId: string, payload: Row): Row {
+  const user = requireUser()
+  requirePermission(user, 'txn.post')
+  const batch = processRow(batchId)
+  requirePlant(user, batch.plant_id)
+  const recipe = batchRecipe(batch)
+  const processMaterial = recipe?.process_material_id
+  if (!processMaterial) refuse(`Batch ${batchId} stays in its tank until it is drawn off.`, { rule: 'not_movable' })
+  if (!OPEN_STAGES.includes(batch.status)) refuse(`Batch ${batchId} is ${batch.status}.`, { rule: 'batch_closed' })
+  const toId = Number(payload.to_location_id || 0)
+  const target = byId.location().get(toId)
+  const typeName = new Map(store.location_type.map((t) => [t.location_type_id, t.name]))
+  if (!target || target.plant_id !== batch.plant_id || !target.active) {
+    invalid('Choose the tank it is going into.', { to_location_id: 'Choose a tank at this plant.' })
+  }
+  if (toId === batch.vessel_id) invalid('It is already in that tank.', { to_location_id: 'Choose a different tank.' })
+  if (!VESSEL_TYPES.includes(typeName.get(target!.location_type_id))) {
+    invalid(`${target!.number} is not a reactor, settle or MGR tank.`, { to_location_id: 'Choose a settle, reactor or MGR tank.' })
+  }
+  const other = (store.process_batch ?? []).find((b) => b.vessel_id === toId && OPEN_STAGES.includes(b.status) && b.batch_id !== batchId)
+  if (other) refuse(`${target!.number} has batch ${other.batch_id} in it.`, { rule: 'vessel_busy' })
+  const lbs = round2([...inVessel(batch).values()].reduce((a, b) => a + b, 0))
+  if (lbs <= 0) refuse('Nothing has been charged yet — there is nothing to move.', { rule: 'empty_batch' })
+  const source = byId.location().get(batch.vessel_id)?.number
+  const txn = postTransaction('PRODUCE', {
+    plant_id: batch.plant_id, department_id: batch.department_id, order_id: batch.order_id, user_date: payload.user_date,
+    from_location_id: batch.vessel_id, from_material_id: processMaterial, from_qty: lbs,
+    to_location_id: toId, to_material_id: processMaterial, to_qty: lbs,
+    remarks: payload.remarks || `${batchId} moved from ${source} to ${target!.number}`,
+  })
+  tagBatch(txn, batchId)
+  batch.vessel_id = toId
+  audit('process.move', 'process_batch', batchId, `Batch ${batchId} moved from ${source} to ${target!.number}`,
+    { lbs, from: source, to: target!.number }, batch.order_id)
   return processGet(batchId)
 }
 
@@ -3629,6 +3712,7 @@ async function route(method: string, path: string, body: Row): Promise<any> {
   if (method === 'POST' && match(path, '/api/process/start')) return processStart(body)
   if ((m = match(path, '/api/process/:id/charge')) && method === 'POST') return processCharge(m[0], body)
   if ((m = match(path, '/api/process/:id/advance')) && method === 'POST') return processAdvance(m[0], String(body.to ?? ''))
+  if ((m = match(path, '/api/process/:id/move')) && method === 'POST') return processMove(m[0], body)
   if ((m = match(path, '/api/process/:id/draw')) && method === 'POST') return processDraw(m[0], body)
   if ((m = match(path, '/api/process/:id/cancel')) && method === 'POST') return processCancel(m[0], String(body.reason ?? ''))
   if ((m = match(path, '/api/process/:id')) && method === 'GET') {

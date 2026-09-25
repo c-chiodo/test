@@ -26,7 +26,7 @@ def stocked_components(conn, admin_user) -> dict[str, int]:
     """Fresh tanks holding the cattle-blend components, keyed by material number."""
 
     tanks: dict[str, int] = {}
-    for number, qty in (("01007", 80_000), ("01008", 120_000), ("00003", 10_000)):
+    for number, qty in (("01007", 80_000), ("01003", 40_000), ("01008", 120_000), ("00003", 10_000)):
         code = f"DM-BT-{uuid.uuid4().hex[:6].upper()}"
         tank = db.insert(
             "location",
@@ -107,11 +107,40 @@ def _payload_from(plan: dict, tanks: dict[str, int] | None = None, **extra) -> d
 def test_a_recipe_scales_to_the_orders_outstanding_quantity(conn, blend_order):
     plan = blend.plan(order_id=blend_order, conn=conn)
     assert plan["quantity"] == 10_000
-    # FE Cattle Blend 2.5: MGR veg, process water and caustic.
-    assert [c["material_number"] for c in plan["components"]] == ["01007", "01008", "00003"]
-    assert plan["components"][0]["required"] == pytest.approx(5_700)   # 57%
-    assert plan["components"][1]["required"] == pytest.approx(4_050)   # 40.5%
-    assert plan["components"][2]["required"] == pytest.approx(250)     # 2.5%
+    # FE Cattle Blend 2.5 as Des Moines makes it: MGR veg and MGR animal,
+    # a little process water, caustic.
+    assert [c["material_number"] for c in plan["components"]] == ["01007", "01003", "01008", "00003"]
+    assert plan["components"][0]["required"] == pytest.approx(6_760)   # 67.6%
+    assert plan["components"][1]["required"] == pytest.approx(2_880)   # 28.8%
+    assert plan["components"][3]["required"] == pytest.approx(210)     # 2.1%
+
+
+def test_a_plant_blends_by_its_own_recipe(conn):
+    cattle = db.scalar("SELECT material_id FROM material WHERE number = '01020'", (), conn)
+    dm = blend.recipe_for_material(cattle, conn, method="blend", plant_id=1)
+    sc = blend.recipe_for_material(cattle, conn, method="blend", plant_id=2)
+    pj = blend.recipe_for_material(cattle, conn, method="blend", plant_id=3)
+    assert (dm["plant_id"], sc["plant_id"]) == (1, 2)
+    assert {c["material_number"]: c["percentage"] for c in sc["components"]}["01008"] == 29.4
+    # A plant without its own falls back to the every-plant recipe.
+    assert pj["plant_id"] is None
+    assert [c["material_number"] for c in pj["components"]] == ["01007", "01008", "00003"]
+
+
+def test_replacing_one_plants_recipe_leaves_the_others(conn, admin_user):
+    cattle = db.scalar("SELECT material_id FROM material WHERE number = '01020'", (), conn)
+    mgr, caustic = (db.scalar("SELECT material_id FROM material WHERE number = ?", (n,), conn) for n in ("01007", "00003"))
+    conn.execute("BEGIN")
+    try:
+        blend.set_recipe(cattle, "FE Cattle Blend - 2.5", [
+            {"material_id": mgr, "percentage": 97.0}, {"material_id": caustic, "percentage": 3.0, "dose": "ph"},
+        ], admin_user, conn=conn, plant_id=2)
+        sc = blend.recipe_for_material(cattle, conn, method="blend", plant_id=2)
+        assert [c["percentage"] for c in sc["components"]] == [97.0, 3.0] and sc["components"][1]["dose"] == "ph"
+        assert blend.recipe_for_material(cattle, conn, method="blend", plant_id=1)["components"][1]["material_number"] == "01003"
+        assert blend.recipe_for_material(cattle, conn, method="blend", plant_id=3)["plant_id"] is None
+    finally:
+        conn.execute("ROLLBACK")
 
 
 def test_a_product_with_no_recipe_says_so(conn, admin_user):
@@ -193,7 +222,7 @@ def test_a_batch_consumes_every_component_and_produces_the_product(
     result = blend.execute(_payload_from(plan, stocked_components), operator, conn)
 
     assert result["batch_id"].startswith("B-")
-    assert len(result["transactions"]) == 3
+    assert len(result["transactions"]) == 4
     assert result["quantity"] == pytest.approx(10_000)
     assert inventory.balance_of(plan["to_location_id"], product, conn) == pytest.approx(
         before + 10_000
@@ -202,7 +231,7 @@ def test_a_batch_consumes_every_component_and_produces_the_product(
         tank = stocked_components[component["material_number"]]
         remaining = inventory.balance_of(tank, component["material_id"], conn)
         assert remaining == pytest.approx(
-            {"01007": 80_000, "01008": 120_000, "00003": 10_000}[component["material_number"]]
+            {"01007": 80_000, "01003": 40_000, "01008": 120_000, "00003": 10_000}[component["material_number"]]
             - component["required"]
         )
     assert orders.get(blend_order, conn)["qty_fulfilled"] == pytest.approx(10_000)
@@ -215,7 +244,7 @@ def test_a_short_component_refuses_the_whole_batch(
 
     plan = blend.plan(order_id=blend_order, conn=conn)
     payload = _payload_from(plan, stocked_components)
-    payload["components"][2]["quantity"] = 60_000   # far beyond the acid tank
+    payload["components"][3]["quantity"] = 60_000   # far beyond the caustic tank
     payload["quantity"] = round(sum(c["quantity"] for c in payload["components"]), 2)
 
     txns_before = db.scalar("SELECT COUNT(*) FROM inventory_transaction", (), conn)
@@ -240,7 +269,7 @@ def test_a_retried_batch_returns_the_batch_that_already_ran(
     first = blend.execute(_payload_from(plan, stocked_components, idempotency_key=key), operator, conn)
     again = blend.execute(_payload_from(plan, stocked_components, idempotency_key=key), operator, conn)
     assert again["batch_id"] == first["batch_id"]
-    assert len(again["transactions"]) == 3
+    assert len(again["transactions"]) == 4
 
 
 def test_a_batch_against_the_wrong_order_is_refused(conn, operator, admin_user, stocked_components):
@@ -280,7 +309,7 @@ def test_voiding_a_batch_reverses_every_row_together(
     for component in plan["components"]:
         tank = stocked_components[component["material_number"]]
         assert inventory.balance_of(tank, component["material_id"], conn) == pytest.approx(
-            {"01007": 80_000, "01008": 120_000, "00003": 10_000}[component["material_number"]]
+            {"01007": 80_000, "01003": 40_000, "01008": 120_000, "00003": 10_000}[component["material_number"]]
         )
 
 

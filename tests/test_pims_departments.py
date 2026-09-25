@@ -47,20 +47,25 @@ def test_acid_is_a_department_only_where_the_soapstock_is(conn, acid):
             conn,
         )
     }
-    assert plants == {"DM", "SC"}
+    assert plants == {"DM", "SC", "PJ"}
     dm = {d["code"]: d for d in departments.for_plant(1, conn)}
     assert dm["ACID"]["runs_batches"] is True
     assert dm["ACID"]["open_orders"] >= 1
-    assert "ACID" not in {d["code"] for d in departments.for_plant(3, conn)}
+    assert "ACID" not in {d["code"] for d in departments.for_plant(4, conn)}
 
 
-def test_the_settle_recipe_carries_the_yields_workbook_ratios(conn):
-    settle = next(r for r in blend.recipes(conn) if r["vessel_type"] == "Settle" and r["material_number"] == "01019")
+def test_each_plants_settle_carries_its_measured_ratios(conn):
+    settles = {r["plant_code"]: r for r in blend.recipes(conn) if r["name"] == "Soap settle"}
+    assert {code: r["material_number"] for code, r in settles.items()} == {"DM": "01019", "SC": "01018", "PJ": "01017"}
+    ratios = {code: {c["material_number"]: c["percentage"] for c in r["components"] if not c["grp"]}
+              for code, r in settles.items()}
+    assert ratios == {"DM": {"00001": 5.2, "00004": 2.4}, "SC": {"00001": 4.8, "00004": 7.7},
+                      "PJ": {"00001": 5.7, "00004": 0.6}}
+    settle = settles["DM"]
+    assert settle["vessel_type"] == "Acid" and settle["yield_pct"] == 68.0      # cooked in a reactor first
     assert settle["method"] == "staged" and settle["expected_tfa"] == 26.0
     soap = [c for c in settle["components"] if c["grp"] == "soap"]
     assert {c["material_number"] for c in soap} == {"00007", "00006", "00010", "00009"}
-    per_100 = {c["material_number"]: c["percentage"] for c in settle["components"] if not c["grp"]}
-    assert per_100 == {"00001": 5.1, "00004": 2.6}          # acid, steam per 100 lbs soap
     assert [o["role"] for o in settle["outputs"]] == ["oil", "mgr", "water"]
 
 
@@ -127,7 +132,7 @@ def test_a_blend_is_unchanged_by_all_this(conn):
 def test_the_acid_tanks_are_the_ones_holding_what_acid_handles(conn, acid):
     board = display.tanks(1, conn, department_id=acid)
     numbers = {t["number"] for t in board["tanks"]}
-    assert {"DM-1", "DM-13", "DM-103"} <= numbers        # settle, MGR, acid tanks
+    assert {"DM-1", "DM-4", "DM-13", "DM-103"} <= numbers        # reactor, settle, MGR, acid tanks
     assert board["department"]["code"] == "ACID"
     handled = departments.materials(acid, 1, conn)
     everything = display.tanks(1, conn)
@@ -136,7 +141,7 @@ def test_the_acid_tanks_are_the_ones_holding_what_acid_handles(conn, acid):
             p["lbs"] > 0.5 and _id("SELECT material_id FROM material WHERE number = ?", (p["number"],), conn) in handled
             for p in tile["products"]
         )
-        if tile["kind"] in {"Settle", "MGR"} or holds_acid_material:
+        if tile["kind"] in {"Acid", "Settle", "MGR"} or holds_acid_material:
             assert tile["number"] in numbers
         else:
             assert tile["number"] not in numbers

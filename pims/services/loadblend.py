@@ -67,7 +67,9 @@ def plan(order_id: int, quantity: float | None = None, conn=None) -> dict[str, A
     not blended on the trailer (a straight load from one tank)."""
 
     order = _order(order_id, conn)
-    recipe = blend.recipe_for_material(int(order["material_one_id"] or 0), conn, method="blend")
+    recipe = blend.recipe_for_material(
+        int(order["material_one_id"] or 0), conn, method="blend", plant_id=order["plant_id"],
+    )
     if recipe is None or not recipe["components"]:
         return None
     if len(recipe["components"]) == 1 and recipe["components"][0]["material_id"] == order["material_one_id"]:

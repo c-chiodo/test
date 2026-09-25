@@ -85,18 +85,68 @@ def _recipe(batch: dict, conn) -> dict | None:
     return blend.recipe_for_material(batch["material_id"], conn, recipe_id=batch["recipe_id"])
 
 
-def _charges(batch: dict, conn) -> list[dict]:
-    """The rows that put something into the vessel for this batch."""
+#: Where a batch can be: the reactor it is cooked in, the tank it settles in,
+#: the MGR tank it is reprocessed in. Every plant moves soap from one to
+#: another before it breaks — Des Moines from 1–3 or 40 into 4–10, Sioux City
+#: from 110/111 into 1–3 and then 4–10.
+VESSEL_TYPES = ("Acid", "Settle", "MGR")
 
-    return db.query(
+
+def _charges(batch: dict, conn) -> list[dict]:
+    """The rows that put something into the batch.
+
+    With a process material the batch may have moved tank to tank since; a
+    charge is a row that *made* the process material, and a move — process
+    material out of a tank the batch was in, into the next — is not one.
+    """
+
+    recipe = _recipe(batch, conn)
+    process_material = (recipe or {}).get("process_material_id")
+    if not process_material:
+        return db.query(
+            """
+            SELECT * FROM inventory_transaction
+            WHERE batch_id = ? AND to_location_id = ? AND voided = 0 AND is_reversal = 0
+            ORDER BY transaction_id
+            """,
+            (batch["batch_id"], batch["vessel_id"]),
+            conn,
+        )
+    rows = db.query(
         """
         SELECT * FROM inventory_transaction
-        WHERE batch_id = ? AND to_location_id = ? AND voided = 0 AND is_reversal = 0
+        WHERE batch_id = ? AND to_material_id = ? AND voided = 0 AND is_reversal = 0
         ORDER BY transaction_id
         """,
-        (batch["batch_id"], batch["vessel_id"]),
+        (batch["batch_id"], process_material),
         conn,
     )
+    been_in = {r["to_location_id"] for r in rows}
+    return [r for r in rows if not _is_move(r, process_material, been_in)]
+
+
+def _is_move(row: dict, process_material: int, been_in: set) -> bool:
+    return row["from_material_id"] == process_material and row["from_location_id"] in been_in
+
+
+def moves(batch: dict, conn=None) -> list[dict]:
+    """The batch's moves from tank to tank, oldest first."""
+
+    recipe = _recipe(batch, conn)
+    process_material = (recipe or {}).get("process_material_id")
+    if not process_material:
+        return []
+    rows = db.query(
+        inventory.TXN_SELECT + " WHERE t.batch_id = ? AND t.to_material_id = ? AND t.voided = 0"
+        " AND t.is_reversal = 0 ORDER BY t.transaction_id",
+        (batch["batch_id"], process_material), conn,
+    )
+    been_in = {r["to_location_id"] for r in rows}
+    return [
+        {"transaction_id": r["transaction_id"], "from": r["from_location_number"], "to": r["to_location_number"],
+         "lbs": r["to_qty"], "at": r["transaction_date"]}
+        for r in rows if _is_move(r, process_material, been_in)
+    ]
 
 
 def contents(batch_id: str, conn=None) -> dict[int, float]:
@@ -224,7 +274,9 @@ def get(batch_id: str, conn=None) -> dict[str, Any]:
 
     # What it broke into, by the recipe's outputs.
     outputs = []
-    out_rows = [r for r in rows if r["from_location_id"] == batch["vessel_id"] and not r["voided"] and not r["is_reversal"]]
+    process_material = (recipe or {}).get("process_material_id")
+    out_rows = [r for r in rows if r["from_location_id"] == batch["vessel_id"] and not r["voided"]
+                and not r["is_reversal"] and not (process_material and r["to_material_id"] == process_material)]
     for output in (recipe or {}).get("outputs", []):
         mine = [r for r in out_rows if r["to_material_id"] == output["material_id"]]
         outputs.append({
@@ -244,6 +296,8 @@ def get(batch_id: str, conn=None) -> dict[str, Any]:
         "stage_minutes": _minutes_since(stage_since) if batch["status"] in OPEN else None,
         "stage_since": stage_since,
         "vessel": vessel,
+        "moves": moves(batch, conn),
+        "can_move": bool(process_material) and batch["status"] in OPEN and total_in > 0,
         "product": names.get(batch["material_id"]),
         "process_material": names.get((recipe or {}).get("process_material_id")),
         "recipe": {
@@ -335,6 +389,8 @@ def vessels(plant_id: int, department_id: int | None = None, conn=None) -> list[
     )]
     if not types:
         return []
+    # A batch starts where its recipe says and can be moved on to any of them.
+    types = sorted(set(types) | set(VESSEL_TYPES))
     marks = ", ".join("?" for _ in types)
     rows = db.query(
         f"""
@@ -396,6 +452,7 @@ def start(payload: dict[str, Any], user: dict, conn=None) -> dict:
     require_plant(user, int(order["plant_id"]), conn)
     recipe = blend.recipe_for_material(
         int(order["material_one_id"] or 0), conn, method="staged", recipe_id=order.get("recipe_id"),
+        plant_id=order["plant_id"],
     )
     if recipe is None or recipe.get("method") != "staged":
         raise BusinessRuleError(
@@ -593,6 +650,73 @@ def advance(batch_id: str, to: str, user: dict, conn=None) -> dict:
         audit.record(
             username=user["username"], action=f"process.{to}", entity="process_batch", entity_id=batch_id,
             order_id=batch["order_id"], summary=f"Batch {batch_id}: {STAGE_LABEL[to].lower()}", conn=conn,
+        )
+    return get(batch_id, conn)
+
+
+def move(batch_id: str, payload: dict[str, Any], user: dict, conn=None) -> dict:
+    """Move the batch, all of it, to another tank: out of the reactor into a
+    settle tank, say. ``payload``: to_location_id, user_date?, remarks?.
+
+    Written as the legacy PIMS writes it — Soap in Process produced out of
+    one tank into the next — and tagged with the batch, so the batch keeps
+    what was charged into it and breaks from wherever it is now.
+    """
+
+    require_permission(user, "txn.post")
+    batch = _row(batch_id, conn)
+    require_plant(user, int(batch["plant_id"]), conn)
+    recipe = _recipe(batch, conn)
+    process_material = (recipe or {}).get("process_material_id")
+    if not process_material:
+        raise BusinessRuleError(f"Batch {batch_id} stays in its tank until it is drawn off.", rule="not_movable")
+    if batch["status"] not in OPEN:
+        raise BusinessRuleError(f"Batch {batch_id} is {batch['status']}.", rule="batch_closed")
+    to_location_id = int(payload.get("to_location_id") or 0)
+    target = db.query_one(
+        "SELECT l.*, lt.name AS vessel_type FROM location l JOIN location_type lt ON lt.location_type_id = l.location_type_id"
+        " WHERE l.location_id = ?",
+        (to_location_id,), conn,
+    )
+    if target is None or target["plant_id"] != batch["plant_id"] or not target["active"]:
+        raise ValidationError("Choose the tank it is going into.", fields={"to_location_id": "Choose a tank at this plant."})
+    if to_location_id == batch["vessel_id"]:
+        raise ValidationError("It is already in that tank.", fields={"to_location_id": "Choose a different tank."})
+    if target["vessel_type"] not in VESSEL_TYPES:
+        raise ValidationError(
+            f"{target['number']} is not a reactor, settle or MGR tank.",
+            fields={"to_location_id": "Choose a settle, reactor or MGR tank."},
+        )
+    other = db.query_one(
+        f"SELECT batch_id FROM process_batch WHERE vessel_id = ? AND status IN ({', '.join('?' for _ in OPEN)})"
+        " AND batch_id <> ?",
+        (to_location_id, *OPEN, batch_id), conn,
+    )
+    if other:
+        raise BusinessRuleError(f"{target['number']} has batch {other['batch_id']} in it.", rule="vessel_busy")
+    lbs = round_lbs(sum(_in_vessel(batch, recipe, conn).values()))
+    if lbs <= 0:
+        raise BusinessRuleError("Nothing has been charged yet — there is nothing to move.", rule="empty_batch")
+    source = db.scalar("SELECT number FROM location WHERE location_id = ?", (batch["vessel_id"],), conn)
+    with db.transaction(conn):
+        txn = inventory.post(
+            "PRODUCE",
+            {
+                "order_id": batch["order_id"], "plant_id": batch["plant_id"], "department_id": batch["department_id"],
+                "from_location_id": batch["vessel_id"], "from_material_id": process_material, "from_qty": lbs,
+                "to_location_id": to_location_id, "to_material_id": process_material, "to_qty": lbs,
+                "user_date": payload.get("user_date"),
+                "remarks": (payload.get("remarks") or f"{batch_id} moved from {source} to {target['number']}"),
+            },
+            user,
+            conn,
+        )
+        db.update("inventory_transaction", {"transaction_id": txn["transaction_id"]}, {"batch_id": batch_id}, conn)
+        db.update("process_batch", {"batch_id": batch_id}, {"vessel_id": to_location_id}, conn)
+        audit.record(
+            username=user["username"], action="process.move", entity="process_batch", entity_id=batch_id,
+            order_id=batch["order_id"], summary=f"Batch {batch_id} moved from {source} to {target['number']}",
+            detail={"lbs": lbs, "from": source, "to": target["number"]}, conn=conn,
         )
     return get(batch_id, conn)
 
