@@ -113,6 +113,8 @@ def main(argv: list[str] | None = None) -> int:
     dept_cmd.add_argument("--yield", dest="yield_pct", type=float, default=100.0,
                           help="lbs out per 100 lbs in")
     dept_cmd.add_argument("--vessel", default="Blend", help="location type the batch runs in")
+    dept_cmd.add_argument("--staged", action="store_true",
+                          help="charged, settled and drawn off over hours (acidulation)")
 
     gp_cmd = sub.add_parser("gp-sync", help="pull Great Plains master data")
     gp_cmd.add_argument("--file", default=None, help="JSON export to read instead of the stub")
@@ -284,6 +286,7 @@ def main(argv: list[str] | None = None) -> int:
         _print(blend.set_recipe(
             product, name, parts, jobs.system_user(), notes="Set from the command line.",
             department_id=department_id, yield_pct=args.yield_pct, vessel_type=args.vessel,
+            method="staged" if args.staged else "blend",
         ))
         return 0
 

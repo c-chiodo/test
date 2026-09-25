@@ -149,7 +149,7 @@ Three invariants are enforced in `post()` rather than left to the screens:
 | — | **Today** | New: the operator's home — every truck to load, batch to blend and trailer to ship at the plant, one button each, the scan box, and the tanks |
 | — | **Load & ship** | New: one page in three parts — check & load, test & seal, ship — pre-filled, and resumable after a sign-out |
 | Department (per plant, on orders, transactions and material types) | **The department picker on Today**, and a batch screen per department | A terminal is set to its department once; Today, the tanks and the pop-out board then show that department's work only |
-| — | **Acid** | The acid department's batches — soapstock, acid and water in, acidulated soapstock out — with the charge and yield worked out |
+| — | **Acid** | Acidulation as it happens: soap in (from a tank, or straight off a truck or railcar), acid in, cook & mix, settle, draw off — one page per batch with the clock, any terminal can pick it up, the yield measured at draw-off |
 | — | **Tank board** | New: pop the tank levels out onto a second monitor or a wall screen; live, read-only, no sign-in on that screen |
 | Blend (via `Blend_recipe_id`) | **Blend** | Recipes as data; pick the work order, the batch arrives scaled with tanks chosen, one button posts it whole |
 | — | Kiosk mode | New: PIN sign-in, touch layout and idle sign-out for a shared plant terminal |
@@ -190,8 +190,18 @@ HC3900 from DM-T105 to DM-T101*); and **Undo** is right there afterwards.
 **Each department sees its own work.** A terminal is set once to its
 department — Acid, Blending, Loadout, Receiving — and remembers it. Today then
 shows only that department's jobs and tanks, and the pop-out board only its
-tanks. The acid department's batches run on their own **Acid** screen with the
-charge and yield worked out (20,000 lbs in makes 16,000 lbs out at 80%).
+tanks.
+
+**Acidulation is not blending, and the screens say so.** Blending puts
+ingredients together and is done: one button. Acidulation takes soap off trucks
+and railcars, adds acid, cooks and mixes it, and leaves it to settle for hours
+before the acidulated soapstock is drawn off. So the **Acid** screen opens on the
+reactors — *DM-ACID-1 · Settling · 3 h 00 min* — and each batch is one page read
+down in that order: ① soap in ② acid in ③ cook & mix ④ settle ⑤ draw off.
+The acid amounts rescale to the soap actually charged; the pounds drawn off are
+the measured pounds, and the difference is recorded as acid water and loss. A
+batch lives on the server, so the operator who charges the reactor at 5 a.m.
+and the one who draws it off after lunch open the same page.
 Departments come from the data — the legacy `Department`, `PlantDepartment`
 and `MaterialType.Department_Id` — so nothing is hard-coded to a name.
 
@@ -213,7 +223,9 @@ readings and the answers about the trailer.
 | Receive a delivery | Today → **Receive** → **Receive 22,000 lbs of 02005 into DM-T104** — the delivery, tank and pounds arrive chosen |
 | Move product between tanks | Plant floor → *Product moved* → tap the tank out, the tank in, type the pounds → **Move** |
 | Write off a heel | Plant floor → *Product lost* → tank, pounds, **Tank heel** → **Write off** (and **Undo** if it was wrong) |
-| Run an acid batch | Today (Acid) → **Run** → **Run 16,000 lbs** |
+| Draw off a settled acid batch | Today (Acid) → **Open** → check the tank and the gauge reading → **Draw off** |
+| Start an acid batch | Acid → **Start in DM-ACID-1** → soap from a tank or off the truck → **Soap is in** → acid (amounts pre-filled) → **Start mixing** → **Let it settle** |
+| Receive by rail | Plant floor → *A delivery arrived* → the PO (railcar already chosen from it) → car number → tank → **Receive** |
 | Blend a batch | Today → **Blend** → **Blend N lbs** — two taps; the recipe, scaled quantity and tanks arrive chosen |
 | See the tanks | always on Today; **Pop out tanks** puts them on another screen |
 

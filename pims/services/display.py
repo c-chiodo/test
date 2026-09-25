@@ -129,6 +129,22 @@ def tanks(plant_id: int, conn=None, department_id: int | None = None) -> dict[st
                 "last_moved": last_moved.get(loc["location_id"]),
             }
         )
+    # A reactor mid-batch says which stage it is at and for how long: a tank
+    # at 40% that is settling is not a tank at 40% that is free.
+    from . import process as process_service
+
+    for batch in process_service.open_batches(plant_id, conn=conn):
+        tile = next((t for t in tiles if t["location_id"] == batch["vessel_id"]), None)
+        if tile is not None:
+            tile["batch"] = {
+                "batch_id": batch["batch_id"],
+                "stage": batch["status"],
+                "label": batch["stage_label"],
+                "minutes": batch["stage_minutes"],
+            }
+            # Soap and acid together in a reactor is the point, not a mix-up.
+            tile["mixed"] = False
+
     department = None
     if department_id:
         department = departments_service.get(int(department_id), conn)

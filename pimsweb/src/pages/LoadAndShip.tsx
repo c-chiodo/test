@@ -295,7 +295,7 @@ export default function LoadAndShip({ initialOrderId }: { initialOrderId?: numbe
 
 /* One part of the page: open while it is the work, one ticked line once it
  * is done (tap to look again), a greyed line while it is not reachable yet. */
-function FlowPart({
+export function FlowPart({
   n, title, done, summary, waiting, keepOpen = false, children,
 }: {
   n: number

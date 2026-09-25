@@ -15,6 +15,8 @@ export interface Store {
   plant: Row[]
   department: Row[]
   plant_department: Row[]
+  process_batch: Row[]
+  exported_at?: Row[]
   order_type: Row[]
   status: Row[]
   material_type: Row[]
@@ -54,14 +56,35 @@ export interface Store {
   job_run: Row[]
 }
 
+/* A batch's stage clock is the one thing a stale snapshot visibly gets wrong
+ * — "settling for 9 days" — so its timestamps are moved forward by however
+ * long ago the snapshot was taken. Everything else keeps its dates. */
+function rebaseClocks(data: Store): Store {
+  const at = data.exported_at?.[0]?.at
+  if (!at || !data.process_batch) return data
+  const shift = Date.now() - new Date(at).getTime()
+  if (!(shift > 0)) return data
+  const move = (iso: string | null) => (iso ? new Date(new Date(iso).getTime() + shift).toISOString() : iso)
+  return {
+    ...data,
+    process_batch: data.process_batch.map((b) => ({
+      ...b,
+      started_at: move(b.started_at), acid_at: move(b.acid_at), mixing_at: move(b.mixing_at),
+      settling_at: move(b.settling_at), drawn_at: move(b.drawn_at),
+    })),
+  }
+}
+
 export const store: Store = {
-  ...(dataset as unknown as Store),
+  ...rebaseClocks(dataset as unknown as Store),
   audit_log: [],
   // Counters start above the seeded series so a generated number never
   // collides with a historical one, exactly as the server seeds them.
   number_sequence: [
     { key: 'bol', next_value: 112_000 },
     { key: 'sample', next_value: 400_000 },
+    // A-00001 is the seeded batch settling in DM's reactor.
+    { key: 'batch-A', next_value: 2 },
   ],
   alert_log: [],
   recurring_order: [],

@@ -45,7 +45,7 @@ from . import inventory, numbering
 def recipes(conn=None, include_inactive: bool = False) -> list[dict]:
     sql = """
         SELECT r.recipe_id, r.material_id, r.name, r.notes, r.active,
-               r.department_id, r.yield_pct, r.vessel_type,
+               r.department_id, r.yield_pct, r.vessel_type, r.method,
                d.code AS department_code, d.description AS department,
                m.number AS material_number, m.description AS material_description
         FROM blend_recipe r
@@ -97,6 +97,7 @@ def set_recipe(
     department_id: int | None = None,
     yield_pct: float = 100.0,
     vessel_type: str = "Blend",
+    method: str = "blend",
 ) -> dict:
     """Create or replace the recipe for a product.
 
@@ -124,6 +125,12 @@ def set_recipe(
             fields={"yield_pct": "Yield is pounds out per 100 lbs in: above 0, at most 100."},
         )
     vessel_type = (vessel_type or "Blend").strip() or "Blend"
+    method = (method or "blend").strip().lower()
+    if method not in ("blend", "staged"):
+        raise ValidationError(
+            f"{method} is not a way of making a batch.",
+            fields={"method": "blend (all at once) or staged (charged, settled, drawn off)."},
+        )
     seen: set[int] = set()
     for component in components:
         cid = int(component["material_id"])
@@ -155,6 +162,7 @@ def set_recipe(
             {
                 "material_id": material_id, "name": name.strip(), "notes": notes, "active": 1,
                 "department_id": department_id, "yield_pct": yield_pct, "vessel_type": vessel_type,
+                "method": method,
             },
             conn,
         )
@@ -177,7 +185,7 @@ def set_recipe(
             summary=f"Recipe set for material {material_id}",
             detail={
                 "name": name, "components": components, "department_id": department_id,
-                "yield_pct": yield_pct, "vessel_type": vessel_type,
+                "yield_pct": yield_pct, "vessel_type": vessel_type, "method": method,
             },
             conn=conn,
         )
@@ -311,7 +319,7 @@ def plan(
         "material_number": material["number"],
         "material_description": material["description"],
         "recipe": {k: recipe.get(k) for k in (
-            "recipe_id", "name", "notes", "department_id", "yield_pct", "vessel_type",
+            "recipe_id", "name", "notes", "department_id", "yield_pct", "vessel_type", "method",
         )},
         "quantity": target,
         "yield_pct": yield_pct,
@@ -396,6 +404,12 @@ def execute(payload: dict[str, Any], user: dict, conn=None) -> dict:
     # The recipe, not the client, decides the yield: a batch posted with a
     # made-up yield would make product out of nothing.
     recipe = recipe_for_material(material_id, conn) if material_id else None
+    if recipe and recipe.get("method") == "staged":
+        raise BusinessRuleError(
+            "This product is made in stages — charged, settled and drawn off — "
+            "not blended in one go. Run it from its department's screen.",
+            rule="staged_recipe",
+        )
     yield_pct = float((recipe or {}).get("yield_pct") or 100.0)
     charge = charge_for(quantity, yield_pct)
     total = round_lbs(sum(float(c.get("quantity") or 0) for c in components))
@@ -509,6 +523,15 @@ def batch(batch_id: str, conn=None) -> dict:
 def void_batch(batch_id: str, reason: str, user: dict, conn=None) -> dict:
     """Reverse a whole batch. Voiding one component of a blend is not a thing
     that can happen to a tank, so it is not a thing the system offers."""
+
+    from . import process
+
+    if process.is_process_batch(batch_id, conn):
+        raise BusinessRuleError(
+            f"{batch_id} is a staged batch; its charges and its draw-off are undone "
+            "one at a time from the batch, not all at once.",
+            rule="staged_batch",
+        )
 
     rows = db.query(
         "SELECT transaction_id FROM inventory_transaction"

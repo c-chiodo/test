@@ -262,6 +262,8 @@ export interface TankTile {
   products: { number: string; description: string; lbs: number }[]
   mixed: boolean
   last_moved: string | null
+  /** A reactor mid-batch: which stage, and for how long. */
+  batch?: { batch_id: string; stage: string; label: string; minutes: number | null }
 }
 
 export interface TankBoardData {
@@ -280,4 +282,36 @@ export interface Department {
   runs_batches: boolean
   /** Where its batches run: 'Blend' belongs to the Blend screen, others get their own. */
   vessel_types: string[]
+  /** 'staged' departments charge, settle and draw off over hours (acidulation). */
+  methods?: string[]
+}
+
+export interface ProcessBatch {
+  batch_id: string
+  order_id: number | null
+  plant_id: number
+  department_id: number | null
+  vessel_id: number
+  material_id: number
+  target_lbs: number
+  status: 'charging' | 'acid' | 'mixing' | 'settling' | 'drawn' | 'cancelled'
+  stage_label: string
+  stage_minutes: number | null
+  stage_since: string
+  started_at: string
+  started_by: string
+  drawn_lbs: number | null
+  vessel: { location_id: number; number: string; description: string; max_capacity: number | null } | null
+  product: { material_id: number; number: string; description: string } | null
+  recipe: { recipe_id: number; name: string; notes: string; yield_pct: number; vessel_type: string } | null
+  expected_yield: number
+  contents: { material_id: number; number: string; description: string; lbs: number }[]
+  total_in: number
+  expected_out: number
+  guide: {
+    material_id: number; material_number: string; material_description: string; percentage: number
+    guide_lbs: number; charged_lbs: number; still_to_add: number; basis: string
+  }[]
+  transactions: Record<string, any>[]
+  timeline: { stage: string; label: string; at: string | null }[]
 }

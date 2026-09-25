@@ -16,10 +16,11 @@
 import { useEffect, useState } from 'react'
 import { batchDepartments, useApp, useToast } from '../App'
 import { api, qs } from '../lib/api'
-import type { Department, Order, PendingShipment, TankBoardData } from '../lib/types'
+import type { Department, Order, PendingShipment, ProcessBatch, TankBoardData } from '../lib/types'
 import { Alert, Badge, ErrorBox, Loading, fmtDate, fmtLbs, today, useAsync } from '../components/ui'
 import PopOutTanks from '../components/PopOutTanks'
 import { readFlow } from './LoadAndShip'
+import { clock } from './Process'
 import { STATE_LABEL } from './TankBoard'
 
 const left = (row: Order) => row.material_one_quantity - row.qty_fulfilled
@@ -57,6 +58,9 @@ export default function Today() {
   const purchases = useAsync(openOrders(3), [plantId])
   const recipes = useAsync(() => api.get<any[]>('/api/blend/recipes'), [])
   const staged = useAsync(() => api.get<PendingShipment[]>(`/api/shipments/pending?plant_id=${plantId}`), [plantId])
+  // Batches under way in a reactor — they span shifts, so whoever is on now
+  // sees them first.
+  const running = useAsync(() => api.get<ProcessBatch[]>(`/api/process/batches?plant_id=${plantId}`), [plantId])
   const tanks = useAsync(
     () => api.get<TankBoardData>(`/api/display/tanks${qs({ plant_id: plantId, department_id: deptId ?? undefined })}`),
     [plantId, deptId],
@@ -64,7 +68,7 @@ export default function Today() {
 
   // The shift's lists go stale as other people work; refresh them quietly.
   useEffect(() => {
-    const timer = window.setInterval(() => { staged.reload(); tanks.reload() }, 60_000)
+    const timer = window.setInterval(() => { staged.reload(); tanks.reload(); running.reload() }, 60_000)
     return () => window.clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plantId, deptId])
@@ -89,11 +93,18 @@ export default function Today() {
     { dept: null as Department | null, title: 'Batches to blend' },
     ...ownScreens.map((d) => ({ dept: d as Department | null, title: `${d.description} batches` })),
   ].map(({ dept, title }) => {
-    const rows = workWaiting.filter((r) => {
-      const recipe = recipeFor.get(r.material_one_id)
-      return dept ? recipe.department_id === dept.department_id : (recipe.vessel_type ?? 'Blend') === 'Blend'
-    })
-    return { dept, title, rows }
+    const staged = Boolean(dept?.methods?.includes('staged'))
+    const underway = staged ? (running.data ?? []).filter((b) => b.department_id === dept!.department_id) : []
+    const busyOrders = new Set(underway.map((b) => b.order_id))
+    const rows: any[] = [
+      ...underway,
+      ...workWaiting.filter((r) => {
+        const recipe = recipeFor.get(r.material_one_id)
+        const mine = dept ? recipe.department_id === dept.department_id : (recipe.vessel_type ?? 'Blend') === 'Blend'
+        return mine && !busyOrders.has(r.order_id)
+      }),
+    ]
+    return { dept, title, rows, staged }
   })
 
   const lanes: LaneSpec[] = [
@@ -130,7 +141,20 @@ export default function Today() {
       loading: work.loading || recipes.loading, error: work.error,
       empty: lane.dept ? `No ${lane.dept.description.toLowerCase()} batches waiting.` : 'Nothing waiting to blend.',
       always: !lane.dept,
-      render: (row: Order) => (
+      render: (row: any) => row.batch_id ? (
+        // A batch in a reactor: its stage and how long it has been there.
+        <>
+          <div className="job-main">
+            <strong>{row.vessel?.number} · {row.stage_label}</strong>
+            <span>Batch {row.batch_id} · {fmtLbs(row.total_in)} lbs in · WO {row.order_id}</span>
+          </div>
+          <div className="job-side">
+            <span className="job-qty">{clock(row.stage_minutes)}</span>
+            <span className="job-due">{row.status === 'settling' ? 'ready to draw off when settled' : 'under way'}</span>
+          </div>
+          <button className={`${canAct ? 'primary ' : ''}job-go`} onClick={() => navigate(`process/${row.batch_id}`)}>Open</button>
+        </>
+      ) : (
         <>
           <div className="job-main">
             <strong>{row.material_one_number} · {row.material_one_description}</strong>
@@ -138,7 +162,7 @@ export default function Today() {
           </div>
           <JobSide qty={left(row)} due={row.due_date} />
           <Go
-            label={lane.dept ? 'Run' : 'Blend'}
+            label={lane.staged ? 'Start' : lane.dept ? 'Run' : 'Blend'}
             act={canAct}
             onAct={() => navigate(lane.dept ? `batches/${lane.dept.department_id}/${row.order_id}` : `blend/${row.order_id}`)}
             onOpen={() => navigate(`orders/${row.order_id}`)}
@@ -166,7 +190,7 @@ export default function Today() {
   ]
   // With a department chosen, only the lanes that hold its work; with
   // everything, the everyday lanes always and the others when they have rows.
-  const settled = !sales.loading && !work.loading && !purchases.loading && !staged.loading && !recipes.loading
+  const settled = !sales.loading && !work.loading && !purchases.loading && !staged.loading && !recipes.loading && !running.loading
   const shown = lanes.filter((lane) => (deptId ? lane.rows.length > 0 : lane.always || lane.rows.length > 0))
 
   async function scan(event: React.FormEvent) {
@@ -331,6 +355,7 @@ export default function Today() {
                   <span>{tank.percent_full === null ? '—' : `${Math.round(tank.percent_full)}%`}</span>
                   <span className="mini-product">{tank.products[0]?.lbs > 0.5 ? tank.products[0].number : 'empty'}</span>
                   {tank.state !== 'normal' && tank.state !== 'empty' && <span className="mini-state">{STATE_LABEL[tank.state]}</span>}
+                  {tank.batch && <span className="mini-batch">{tank.batch.label} · {clock(tank.batch.minutes)}</span>}
                 </div>
               </div>
             ))}
@@ -371,7 +396,7 @@ function Lane({ spec }: { spec: LaneSpec }) {
       ) : (
         <ul className="jobs">
           {rows.slice(0, MAX_ROWS).map((row, i) => (
-            <li key={row.stage_id ?? row.order_id ?? i} className="job">{render(row)}</li>
+            <li key={row.batch_id ?? row.stage_id ?? row.order_id ?? i} className="job">{render(row)}</li>
           ))}
           {rows.length > MAX_ROWS && (
             <li className="job-more">and {rows.length - MAX_ROWS} more — scan the paperwork to go straight to one</li>

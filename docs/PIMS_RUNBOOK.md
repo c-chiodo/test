@@ -431,20 +431,35 @@ python -m pims department list --plant DM
 python -m pims department add --code ACID --name Acid --plants DM,SC
 ```
 
-**The acid department's recipe.** Acid batches run on the batch engine with a
-*yield*: the work order asks for pounds out, the plan charges `out ÷ yield`
-pounds in, and the difference is recorded as process loss on the PRODUCE rows.
-The sandbox's acid recipe — veg soapstock 90%, acid 6%, process water 4% of
-the charge, 80% yield, run in an `Acid` reactor — is a **placeholder**: nobody
-has given us the real numbers. Set them before using it:
+**How acidulation is recorded.** Soap arrives by truck or railcar (the receive
+screen asks which, and takes the trailer or car number). An acid batch is a
+*staged* batch in a reactor, recorded as it happens:
+
+| Stage | On the screen | In the ledger |
+|---|---|---|
+| Soap in | from a tank, or straight off a truck/railcar | MOVE into the reactor, or RECEIVE against the PO, tagged with the batch |
+| Acid in | acid and water, amounts rescaled to the soap charged | MOVE into the reactor, tagged |
+| Cook & mix | a clock | the time, on the batch |
+| Settle | a clock | the time, on the batch |
+| Draw off | the tank, and the **measured** pounds | PRODUCE: everything charged out of the reactor, the measured pounds into the tank; the difference is acid water and loss |
+
+A draw-off more than 8 points from the recipe's usual yield asks for
+confirmation. A batch with product in cannot be cancelled — draw it off, or
+undo the charges. The batch and its clock live on the server (`process_batch`),
+so a batch settling across a shift change is picked up on any terminal; the
+reactor's tile on Today and on the tank board says which stage it is at.
+Acid batches are numbered `A-#####`.
+
+**The acid department's recipe.** The recipe's percentages are a *guide* — the
+charge shown to the operator — and its yield is what a draw-off is compared
+with. The sandbox's numbers (soapstock 90%, acid 6%, process water 4% of the
+charge, about 80% out) are **placeholders**: nobody has given us the real ones.
+Set them before using it:
 
 ```sh
 python -m pims department recipe --code ACID --product 02001 \
   --component 02005=90 --component 00001=6 --component 00010=4 \
-  --yield 80 --vessel Acid
+  --yield 80 --vessel Acid --staged
 ```
 
-The reactor is an ordinary location whose type is `Acid`. The recipe's yield
-decides the pounds — a batch posted with components that do not add up to the
-charge is refused — and acid batches are numbered `A-#####` so they read
-differently from blends (`B-#####`) on the floor and in Activity.
+The reactor is an ordinary location whose type is `Acid`; add one per reactor.

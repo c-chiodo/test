@@ -37,6 +37,7 @@ TABLES = [
     "material_spec",
     "blend_recipe",
     "blend_recipe_component",
+    "process_batch",
     "location_type",
     "location",
     "location_default",
@@ -69,6 +70,11 @@ def main() -> int:
         data[table] = db.query(f'SELECT * FROM "{table}"')
     data["app_user"] = db.query(f"SELECT {USER_COLUMNS} FROM app_user WHERE active = 1")
     data["user_plant_access"] = db.query("SELECT * FROM user_plant_access")
+    # When this snapshot was taken, so the sandbox can keep a batch's clock
+    # honest ("settling 3 h") however long after the build it is opened.
+    from pims.util import utc_now_iso
+
+    data["exported_at"] = [{"at": utc_now_iso()}]
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(data, separators=(",", ":")), encoding="utf-8")

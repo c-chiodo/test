@@ -62,7 +62,7 @@ export default function Operations({ initialOperation, orderId }: { initialOpera
   const own = batchDepartments(departments)
   const groups: { title: string; tasks: Task[] }[] = [
     { title: 'Trucks', tasks: [
-      { key: 'receive', job: 'receive', icon: '⇣', title: 'A delivery arrived', detail: 'Product came in on a truck or railcar and went into a tank.' },
+      { key: 'receive', job: 'receive', icon: '⇣', title: 'A delivery arrived', detail: 'Soap, acid or an ingredient came in on a truck or railcar and went into a tank.' },
       { key: 'load', route: 'load-ship', icon: '⇡', title: 'Load a truck', detail: 'Check the trailer, load it, test it and send it — one page.' },
       { key: 'ship', job: 'ship', icon: '⇢', title: 'Ship a loaded trailer', detail: 'The trailer is loaded and sealed, and the driver is leaving.' },
     ]},
@@ -71,7 +71,9 @@ export default function Operations({ initialOperation, orderId }: { initialOpera
       ...own.map((d) => ({
         key: `batch-${d.department_id}`, route: `batches/${d.department_id}`, icon: '⚗',
         title: `Run ${/^[aeiou]/i.test(d.description) ? 'an' : 'a'} ${d.description.toLowerCase()} batch`,
-        detail: `The ${d.description.toLowerCase()} department's recipe, charge and yield, worked out for you.`,
+        detail: d.methods?.includes('staged')
+          ? 'Soap in, acid in, mix, settle, draw off — the reactor and its clock, stage by stage.'
+          : `The ${d.description.toLowerCase()} department's recipe, charge and yield, worked out for you.`,
       })),
       { key: 'produce', job: 'produce', icon: '⚙', title: 'Made product without a recipe', detail: 'Something went in and something else came out, on a work order.' },
     ]},
@@ -141,7 +143,7 @@ function JobPage({ title, children }: { title: string; children: React.ReactNode
 
 /* ------------------------------------------------------------ shared parts */
 
-function Step({ n, title, hint, children }: { n: number; title: string; hint?: string; children: React.ReactNode }) {
+export function Step({ n, title, hint, children }: { n: number; title: string; hint?: string; children: React.ReactNode }) {
   return (
     <section className="pf-step">
       <header>
@@ -155,7 +157,7 @@ function Step({ n, title, hint, children }: { n: number; title: string; hint?: s
 }
 
 /** The plant's tanks, with material ids alongside the tile's product numbers. */
-function useTanks() {
+export function useTanks() {
   const { plantId, reference } = useApp()
   const board = useAsync(() => api.get<TankBoardData>(`/api/display/tanks?plant_id=${plantId}`), [plantId])
   const ids = useMemo(() => new Map(reference.materials.map((m) => [m.number, m.material_id])), [reference.materials])
@@ -173,7 +175,7 @@ function useTanks() {
  * decision for a person, so the tile says so (the ledger does not forbid it). */
 const MIX_WARN_LBS = 2_000
 
-function TankPicker({
+export function TankPicker({
   tiles, value, onChange, mode, materialId, qty, holds, mainProduct, exclude, suggested,
 }: {
   tiles: TankTile[]
@@ -254,7 +256,7 @@ function TankPicker({
   )
 }
 
-function Qty({
+export function Qty({
   value, onChange, max, maxLabel, reading, onUseReading,
 }: {
   value: string
@@ -417,6 +419,11 @@ function ReceiveJob({ orderId }: { orderId?: number }) {
   const [picked, setPicked] = useState<number | null>(orderId ?? null)
   const [tank, setTank] = useState<number | null>(null)
   const [qty, setQty] = useState('')
+  // Soap, acid and blend ingredients come in on trucks and on railcars; which,
+  // and its number, goes on the receipt — the car number is how a quality
+  // problem is traced back to the supplier.
+  const [conveyance, setConveyance] = useState<'Truck' | 'Railcar'>('Truck')
+  const [vehicle, setVehicle] = useState('')
   const [form, setForm] = useState<Record<string, any>>({ user_date: today() })
   const set = (patch: Record<string, any>) => setForm((current) => ({ ...current, ...patch }))
   const { busy, error, posted, post, reset } = usePost('receive')
@@ -430,21 +437,35 @@ function ReceiveJob({ orderId }: { orderId?: number }) {
 
   // The tank already holding this product, with the most room, is the
   // obvious one; failing that, an empty tank. Suggested, never forced.
+  const need = Number(qty || 0)
   const suggested = useMemo(() => {
     if (!materialId) return null
-    const same = tiles.filter((t) => holds(t, materialId) > 0.5).sort((a, b) => (b.room ?? 0) - (a.room ?? 0))
-    const empty = tiles.filter((t) => t.total <= 0.5 && t.kind === 'Tank')
+    // Only a tank that can take the whole delivery is suggested.
+    const fits = (t: TankTile) => t.room === null || t.room + 0.5 >= need
+    const same = tiles.filter((t) => holds(t, materialId) > 0.5 && fits(t)).sort((a, b) => (b.room ?? 0) - (a.room ?? 0))
+    const empty = tiles.filter((t) => t.total <= 0.5 && t.kind === 'Tank' && fits(t))
     return (same[0] ?? empty[0])?.location_id ?? null
-  }, [tiles, materialId])
-  useEffect(() => { if (order) { setQty(String(Math.round(remaining * 100) / 100)); setTank(null) } }, [picked, orders.data])
+  }, [tiles, materialId, need])
+  useEffect(() => {
+    if (!order) return
+    setQty(String(Math.round(remaining * 100) / 100))
+    setTank(null)
+    setConveyance(/rail/i.test(order.ship_method || '') ? 'Railcar' : 'Truck')
+  }, [picked, orders.data])
   // One truck expected: that is the one that arrived.
   useEffect(() => { if (picked === null && open.length === 1) setPicked(open[0].order_id) }, [orders.data])
-  useEffect(() => { if (tank === null && suggested) setTank(suggested) }, [suggested])
+  useEffect(() => {
+    const current = tiles.find((t) => t.location_id === tank)
+    // Follow the suggestion until the operator picks, and drop a tank that
+    // can no longer take the pounds typed.
+    if (tank === null || (current && current.room !== null && current.room + 0.5 < need)) setTank(suggested)
+  }, [suggested])
 
   if (posted) {
     return <Done txn={posted}
-      sentence={`${fmtLbs(posted.to_qty)} lbs of ${posted.to_material_number} received into ${posted.to_location_number}`}
-      onAnother={() => { reset(); setPicked(null); setTank(null); setQty('') }} />
+      sentence={`${fmtLbs(posted.to_qty)} lbs of ${posted.to_material_number} received into ${posted.to_location_number}`
+        + ` off ${conveyance.toLowerCase()}${posted.trailer_number ? ` ${posted.trailer_number}` : ''}`}
+      onAnother={() => { reset(); setPicked(null); setTank(null); setQty(''); setVehicle('') }} />
   }
 
   const n = Number(qty || 0)
@@ -465,7 +486,11 @@ function ReceiveJob({ orderId }: { orderId?: number }) {
                 onClick={() => setPicked(o.order_id)}>
                 <strong>{o.vendor_name ?? 'Vendor'}{picked === o.order_id ? ' ✓' : ''}</strong>
                 <span>{o.material_one_number} · {o.material_one_description}</span>
-                <span className="muted">{fmtLbs(o.material_one_quantity - o.qty_fulfilled)} lbs expected · PO {o.order_id} · due {fmtDate(o.due_date)}</span>
+                <span className="muted">
+                  {fmtLbs(o.material_one_quantity - o.qty_fulfilled)} lbs expected
+                  {/rail/i.test(o.ship_method || '') ? ' by rail' : /truck/i.test(o.ship_method || '') ? ' by truck' : ''}
+                  {' '}· PO {o.order_id} · due {fmtDate(o.due_date)}
+                </span>
               </button>
             ))}
           </div>
@@ -473,11 +498,32 @@ function ReceiveJob({ orderId }: { orderId?: number }) {
       </Step>
       {order && (
         <>
-          <Step n={2} title="Into which tank?" hint={`Tanks holding ${order.material_one_number} come first`}>
+          <Step n={2} title="Truck or railcar?">
+            <div className="row" style={{ gap: 8 }}>
+              {(['Truck', 'Railcar'] as const).map((c) => (
+                <button key={c} className={conveyance === c ? 'primary' : ''} aria-pressed={conveyance === c}
+                  onClick={() => setConveyance(c)}>{c}</button>
+              ))}
+              <input
+                aria-label={`${conveyance} number`}
+                placeholder={conveyance === 'Railcar' ? 'Railcar number, e.g. UTLX 204417' : 'Trailer number'}
+                value={vehicle}
+                onChange={(e) => setVehicle(e.target.value)}
+                style={{ maxWidth: 280 }}
+              />
+            </div>
+          </Step>
+          <Step n={3} title="Into which tank?" hint={`Tanks holding ${order.material_one_number} come first`}>
             <TankPicker tiles={tiles} value={tank} onChange={setTank} mode="to" materialId={materialId}
               qty={n} holds={holds} mainProduct={mainProduct} suggested={suggested} />
+            {n > 0 && !suggested && tiles.length > 0 && (
+              <div className="small muted" style={{ marginTop: 8 }}>
+                No storage tank has room for all {fmtLbs(n)} lbs. Receive part of it into one tank now
+                and the rest into another — or, for soap, put it straight into a reactor from the batch on the acid screen.
+              </div>
+            )}
           </Step>
-          <Step n={3} title="How much came in?">
+          <Step n={4} title="How much came in?">
             <Qty value={qty} onChange={setQty} reading={reading}
               onUseReading={() => setQty(String(reading.net_lbs ?? reading.gross_lbs))} />
           </Step>
@@ -487,10 +533,12 @@ function ReceiveJob({ orderId }: { orderId?: number }) {
               onClick={() => post({
                 order_id: order.order_id, plant_id: plantId, to_location_id: tank, to_material_id: materialId,
                 to_qty: n, ...form,
+                trailer_number: vehicle.trim(),
+                remarks: [`${conveyance}${vehicle.trim() ? ` ${vehicle.trim()}` : ''}`, form.remarks].filter(Boolean).join(' — '),
                 scale_reading_id: reading && n === (reading.net_lbs ?? reading.gross_lbs) ? reading.reading_id : null,
               })}>
               {busy ? <span className="spinner" /> : null}
-              Receive {fmtLbs(n)} lbs of {materialLabel(reference, materialId)} into {tankNumber(tiles, tank)}
+              Receive {fmtLbs(n)} lbs of {materialLabel(reference, materialId)} off the {conveyance.toLowerCase()} into {tankNumber(tiles, tank)}
             </button>
           </div>
         </>

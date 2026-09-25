@@ -338,10 +338,11 @@ BLEND_RECIPES = [
     ("05001", "AV4000", [("02005", 70.0), ("02001", 30.0)]),
 ]
 
-#: Acidulation: veg soapstock split with acid into acidulated soapstock
-#: (02001, which the blend recipes above consume) and acid water. The
-#: materials are the plant's own; the proportions and the yield are not —
-#: nobody has told us them — so they are marked as placeholders to replace.
+#: Acidulation: veg soapstock, off trucks and railcars, charged to a reactor;
+#: acid added; cooked, mixed and settled; acidulated soapstock (02001, which
+#: the blend recipes above consume) drawn off the top and acid water off the
+#: bottom. The materials are the plant's own; the proportions and the yield
+#: are not — nobody has told us them — so they are marked as placeholders.
 ACID_RECIPES = [
     ("02001", "Acidulated Soapstock", [("02005", 90.0), ("00001", 6.0), ("00010", 4.0)]),
 ]
@@ -374,10 +375,10 @@ def seed_all(conn: sqlite3.Connection | None = None) -> None:
 
 def _seed_recipes(conn, material_ids: dict[str, int]) -> None:
     departments = {code: did for did, code, _d in DEPARTMENTS}
-    recipes = [(p, n, parts, "BLND", 100.0, "Blend", "Demo formulation — replace with the plant's real recipe.")
+    recipes = [(p, n, parts, "BLND", 100.0, "Blend", "Demo formulation — replace with the plant's real recipe.", "blend")
                for p, n, parts in BLEND_RECIPES]
-    recipes += [(*recipe, "ACID", ACID_YIELD, "Acid", ACID_NOTE) for recipe in ACID_RECIPES]
-    for product, name, parts, department, yield_pct, vessel, note in recipes:
+    recipes += [(*recipe, "ACID", ACID_YIELD, "Acid", ACID_NOTE, "staged") for recipe in ACID_RECIPES]
+    for product, name, parts, department, yield_pct, vessel, note, method in recipes:
         recipe_id = db.insert(
             "blend_recipe",
             {
@@ -388,6 +389,7 @@ def _seed_recipes(conn, material_ids: dict[str, int]) -> None:
                 "department_id": departments[department],
                 "yield_pct": yield_pct,
                 "vessel_type": vessel,
+                "method": method,
             },
             conn,
         )
@@ -1162,6 +1164,10 @@ def _seed_acid(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> 
             },
             conn,
         )
+        reactor = db.scalar(
+            "SELECT location_id FROM location WHERE plant_id = ? AND number = ?",
+            (plant_id, f"{code}-ACID-1"), conn,
+        )
         for index, qty in enumerate(work[code]):
             order_id += 1
             db.insert(
@@ -1187,6 +1193,67 @@ def _seed_acid(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> 
                 },
                 conn,
             )
+            if code == "DM" and index == 0:
+                _seed_settling_batch(conn, order_id, plant_id, acid_id, reactor, qty, material_ids, user_ids)
+
+
+def _seed_settling_batch(conn, order_id, plant_id, department_id, reactor, target, material_ids, user_ids) -> None:
+    """DM's reactor mid-batch: soap and acid in since the early shift, three
+    hours into settling — the state a day-shift operator walks in to."""
+
+    now = utc_now().replace(microsecond=0)
+    started = now - timedelta(hours=7)
+    charges = (("02005", "DM-T104", 18_000.0, 0), ("00001", "DM-T101", 1_200.0, 50), ("00010", "DM-T102", 800.0, 55))
+    db.insert(
+        "process_batch",
+        {
+            "batch_id": "A-00001",
+            "order_id": order_id,
+            "plant_id": plant_id,
+            "department_id": department_id,
+            "recipe_id": db.scalar(
+                "SELECT recipe_id FROM blend_recipe WHERE material_id = ? AND active = 1",
+                (material_ids["02001"],), conn,
+            ),
+            "vessel_id": reactor,
+            "material_id": material_ids["02001"],
+            "target_lbs": target,
+            "status": "settling",
+            "started_at": started.isoformat(),
+            "started_by": "toperator",
+            "acid_at": (started + timedelta(minutes=45)).isoformat(),
+            "mixing_at": (started + timedelta(minutes=70)).isoformat(),
+            "settling_at": (now - timedelta(hours=3)).isoformat(),
+        },
+        conn,
+    )
+    for number, tank, lbs, minutes in charges:
+        at = (started + timedelta(minutes=minutes)).isoformat()
+        db.insert(
+            "inventory_transaction",
+            {
+                "transaction_type_id": 3,
+                "plant_id": plant_id,
+                "department_id": department_id,
+                "transaction_date": at,
+                "user_date": at[:10],
+                "user_id": user_ids["toperator"],
+                "from_location_id": db.scalar("SELECT location_id FROM location WHERE number = ?", (tank,), conn),
+                "from_material_id": material_ids[number],
+                "from_qty": lbs,
+                "to_location_id": reactor,
+                "to_material_id": material_ids[number],
+                "to_qty": lbs,
+                "remarks": "Charged to A-00001",
+                "batch_id": "A-00001",
+            },
+            conn,
+        )
+    db.execute(
+        "INSERT INTO number_sequence (key, next_value) VALUES ('batch-A', 2)"
+        " ON CONFLICT(key) DO UPDATE SET next_value = MAX(next_value, 2)",
+        (), conn,
+    )
 
 
 def _seed_deliveries(conn, material_ids: dict[str, int]) -> None:
@@ -1198,16 +1265,19 @@ def _seed_deliveries(conn, material_ids: dict[str, int]) -> None:
     """
 
     receiving = next(did for did, code, _d in DEPARTMENTS if code == "RECV")
+    acid = next(did for did, code, _d in DEPARTMENTS if code == "ACID")
     order_id = int(db.scalar('SELECT MAX(order_id) FROM "order"', (), conn) or 0)
     today = utc_now().date()
+    # Soap and acid for acidulation are the acid department's deliveries; a
+    # railcar of soap holds three trucks' worth.
     expected = {
-        "DM": (("02005", 22_000.0, 2), ("00001", 18_000.0, 5)),
-        "SC": (("02005", 22_000.0, 1),),
-        "PJ": (("00001", 18_000.0, 3),),
-        "LV": (("00001", 12_000.0, 4),),
+        "DM": (("02005", 44_000.0, 2, "ACID", "Truck"), ("00001", 18_000.0, 5, "ACID", "Truck")),
+        "SC": (("02005", 60_000.0, 1, "ACID", "Rail"),),
+        "PJ": (("00001", 18_000.0, 3, "RECV", "Truck"),),
+        "LV": (("00001", 12_000.0, 4, "RECV", "Truck"),),
     }
     for plant_id, code, _name in PLANTS:
-        for index, (number, qty, vendor) in enumerate(expected.get(code, ())):
+        for index, (number, qty, vendor, dept, method) in enumerate(expected.get(code, ())):
             order_id += 1
             db.insert(
                 "order",
@@ -1219,12 +1289,12 @@ def _seed_deliveries(conn, material_ids: dict[str, int]) -> None:
                     "order_reference": f"PO-{code}-{index + 1}",
                     "company_id": 1,
                     "plant_id": plant_id,
-                    "department_id": receiving,
+                    "department_id": acid if dept == "ACID" else receiving,
                     "blend_serial_number": "",
                     "vendor_id": vendor,
                     "material_one_id": material_ids[number],
                     "material_one_quantity": qty,
-                    "ship_method": "",
+                    "ship_method": method,
                     "trailer_number": "",
                     "comments": "",
                     "status_id": 1,

@@ -27,7 +27,7 @@ from .integrations import gp_sync, lims_ingest
 from .integrations import scale as scale_integration
 from .services import (
     alerts, blend, departments, display, inquiry, inventory, jobs, lims, numbering, orders, prefill,
-    qc, query, reference, scan, specs,
+    process, qc, query, reference, scan, specs,
 )
 from .util import utc_now
 
@@ -119,6 +119,7 @@ LEGACY_SCREENS = [
     (r"^/api/transactions/\d+/void", "the order's transactions in PIMS"),
     (r"^/api/shipments/", "Order Selection Menu → Ship Trailer"),
     (r"^/api/blend/", "Order Selection Menu → Produce"),
+    (r"^/api/process/", "Order Selection Menu → Produce"),
     (r"^/api/orders/close", "Order Edit Menu → Close Selected Orders"),
     (r"^/api/orders/\d+/qc", "Quality Control → Regular QC"),
     (r"^/api/qc/", "Quality Control → Regular QC"),
@@ -702,6 +703,7 @@ def set_blend_recipe(material_id: int, payload: dict = Body(...), user: dict = U
         department_id=payload.get("department_id") or None,
         yield_pct=payload.get("yield_pct") or 100.0,
         vessel_type=payload.get("vessel_type") or "Blend",
+        method=payload.get("method") or "blend",
     )
 
 
@@ -729,6 +731,55 @@ def blend_plan(
 @app.post("/api/blend/execute", tags=["blend"], status_code=201)
 def blend_execute(payload: dict = Body(...), user: dict = User) -> dict:
     return blend.execute(payload, user)
+
+
+# ----------------------------------------------------------- staged batches
+
+
+@app.get("/api/process/vessels", tags=["process"])
+def process_vessels(plant_id: int, department_id: int | None = None, user: dict = User) -> list[dict]:
+    """Each reactor, and the batch in it: what the acid screen opens on."""
+
+    security.require_plant(user, plant_id)
+    return process.vessels(plant_id, department_id)
+
+
+@app.get("/api/process/batches", tags=["process"])
+def process_batches(plant_id: int, department_id: int | None = None, user: dict = User) -> list[dict]:
+    security.require_plant(user, plant_id)
+    return process.open_batches(plant_id, department_id)
+
+
+@app.post("/api/process/start", tags=["process"], status_code=201)
+def process_start(payload: dict = Body(...), user: dict = User) -> dict:
+    return process.start(payload, user)
+
+
+@app.get("/api/process/{batch_id}", tags=["process"])
+def process_get(batch_id: str, user: dict = User) -> dict:
+    batch = process.get(batch_id)
+    security.require_plant(user, batch["plant_id"])
+    return batch
+
+
+@app.post("/api/process/{batch_id}/charge", tags=["process"])
+def process_charge(batch_id: str, payload: dict = Body(...), user: dict = User) -> dict:
+    return process.charge(batch_id, payload, user)
+
+
+@app.post("/api/process/{batch_id}/advance", tags=["process"])
+def process_advance(batch_id: str, payload: dict = Body(...), user: dict = User) -> dict:
+    return process.advance(batch_id, str(payload.get("to") or ""), user)
+
+
+@app.post("/api/process/{batch_id}/draw", tags=["process"])
+def process_draw(batch_id: str, payload: dict = Body(...), user: dict = User) -> dict:
+    return process.draw_off(batch_id, payload, user)
+
+
+@app.post("/api/process/{batch_id}/cancel", tags=["process"])
+def process_cancel(batch_id: str, payload: dict = Body(default={}), user: dict = User) -> dict:
+    return process.cancel(batch_id, str(payload.get("reason") or ""), user)
 
 
 @app.get("/api/blend/batches/{batch_id}", tags=["blend"])

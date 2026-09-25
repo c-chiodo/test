@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { DEMO, api, qs } from '../lib/api'
+import { clock } from './Process'
 import type { TankBoardData, TankTile } from '../lib/types'
 import { fmtLbs } from '../components/ui'
 
@@ -197,6 +198,12 @@ function Tile({ tank, now }: { tank: TankTile; now: number }) {
           </>
         ) : <span className="muted-on-dark">—</span>}
       </div>
+      {tank.batch && (
+        <div className="tile-batch">
+          Batch {tank.batch.batch_id} · <strong>{tank.batch.label}</strong>
+          {tank.batch.minutes !== null ? ` · ${clock(tank.batch.minutes)}` : ''}
+        </div>
+      )}
       <div className="tile-foot">{ago(tank.last_moved, now)}</div>
     </section>
   )

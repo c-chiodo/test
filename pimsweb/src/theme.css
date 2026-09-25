@@ -926,3 +926,39 @@ body.kiosk button.big { font-size: 19px; }
 .tank-option-text span { overflow: hidden; text-overflow: ellipsis; }
 .tank-flag { font-size: 11.5px; font-weight: 700; color: var(--warn); text-transform: uppercase; letter-spacing: 0.03em; }
 .tank-flag.ok { color: var(--ok); }
+
+/* ------------------------------------------------------- staged batches */
+
+.reactors { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); }
+.reactor {
+  display: flex; gap: 14px; align-items: stretch; text-align: left; white-space: normal;
+  padding: 14px 16px; border-radius: var(--radius); background: var(--surface);
+  border: 1px solid var(--border); box-shadow: var(--shadow);
+}
+.reactor.busy { border-color: var(--brand); }
+.reactor:disabled { opacity: 1; cursor: default; }
+.reactor-text { display: flex; flex-direction: column; gap: 2px; font-size: 14px; }
+.reactor-text strong { font-size: 18px; }
+.reactor-stage { font-size: 16px; font-weight: 700; color: var(--brand); }
+.reactor-open { margin-top: 6px; font-weight: 650; color: var(--brand); }
+.mini-gauge.tall { min-height: 96px; width: 20px; }
+.mini-gauge.tall > span { position: absolute; left: 0; right: 0; bottom: 0; background: var(--text-3); }
+
+.stage-strip { display: flex; gap: 8px; flex-wrap: wrap; align-items: stretch; margin-bottom: 14px; }
+.stage-pill {
+  display: flex; flex-direction: column; padding: 8px 12px; border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--surface-2); font-size: 13px; min-width: 120px;
+}
+.stage-pill span { color: var(--text-2); font-size: 12px; }
+.stage-pill.done { background: var(--ok-soft); border-color: color-mix(in srgb, var(--ok) 35%, transparent); }
+.stage-pill.now { background: var(--brand-soft); border: 2px solid var(--brand); padding: 7px 11px; }
+.stage-clock { margin-left: auto; align-self: center; font-size: 18px; font-weight: 750; color: var(--brand); }
+.big-clock { font-size: 28px; font-weight: 750; font-variant-numeric: tabular-nums; }
+.guide-line { font-size: 15px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.charges { margin: 0; padding-left: 18px; font-size: 14px; }
+.charges li { margin: 2px 0; }
+.add-charge { border: 1px dashed var(--border-strong); border-radius: var(--radius-sm); padding: 12px; }
+.acid-part { display: flex; flex-direction: column; gap: 10px; padding-bottom: 12px; border-bottom: 1px solid var(--border); }
+.yield-line { margin-top: 8px; font-size: 14.5px; }
+.mini-batch { font-size: 11.5px !important; font-weight: 700; color: var(--brand); }
+.tile-batch { font-size: 15px; color: #7fb0dd; }

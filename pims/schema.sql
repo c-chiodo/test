@@ -474,7 +474,10 @@ CREATE TABLE IF NOT EXISTS blend_recipe (
     -- acidulation splits off acid water, so less comes out than goes in.
     yield_pct     REAL NOT NULL DEFAULT 100,
     -- The location type the batch runs in: 'Blend' tank, 'Acid' reactor.
-    vessel_type   TEXT NOT NULL DEFAULT 'Blend'
+    vessel_type   TEXT NOT NULL DEFAULT 'Blend',
+    -- 'blend': everything in and out at once. 'staged': charged, reacted and
+    -- settled over hours, then drawn off and measured (acidulation).
+    method        TEXT NOT NULL DEFAULT 'blend'
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_recipe_material
@@ -487,6 +490,34 @@ CREATE TABLE IF NOT EXISTS blend_recipe_component (
     percentage   REAL NOT NULL,
     sort_order   INTEGER NOT NULL DEFAULT 0
 );
+
+-- A staged batch in a vessel: soap charged, acid added, mixed, settled and
+-- drawn off. The movements are ordinary ledger rows carrying the batch_id;
+-- this row is the batch's stage and clock, so a batch that settles across a
+-- shift change can be picked up on any terminal.
+CREATE TABLE IF NOT EXISTS process_batch (
+    batch_id      TEXT PRIMARY KEY,
+    order_id      INTEGER REFERENCES "order"(order_id),
+    plant_id      INTEGER NOT NULL REFERENCES plant(plant_id),
+    department_id INTEGER REFERENCES department(department_id),
+    recipe_id     INTEGER REFERENCES blend_recipe(recipe_id),
+    vessel_id     INTEGER NOT NULL REFERENCES location(location_id),
+    material_id   INTEGER NOT NULL REFERENCES material(material_id),
+    target_lbs    REAL NOT NULL DEFAULT 0,
+    -- charging -> acid -> mixing -> settling -> drawn (or cancelled)
+    status        TEXT NOT NULL DEFAULT 'charging',
+    started_at    TEXT NOT NULL,
+    started_by    TEXT NOT NULL,
+    acid_at       TEXT,
+    mixing_at     TEXT,
+    settling_at   TEXT,
+    drawn_at      TEXT,
+    drawn_by      TEXT,
+    drawn_lbs     REAL,
+    notes         TEXT NOT NULL DEFAULT ''
+);
+
+CREATE INDEX IF NOT EXISTS ix_process_vessel ON process_batch (vessel_id, status);
 
 CREATE TABLE IF NOT EXISTS number_sequence (
     key        TEXT PRIMARY KEY,

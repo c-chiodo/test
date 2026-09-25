@@ -30,6 +30,7 @@ import Inquiry from './pages/Inquiry'
 import QueryBuilder from './pages/QueryBuilder'
 import Specs from './pages/Specs'
 import Support from './pages/Support'
+import { ProcessBatchPage, ProcessOverview } from './pages/Process'
 
 interface AppState {
   user: User
@@ -503,6 +504,7 @@ function Shell({
 const WRITE_ROUTES = new Set([
   ...NAV.flatMap((section) => section.items).filter((item) => item.writes).map((item) => item.route),
   'batches',
+  'process',
 ])
 
 /** Departments whose batches run in a vessel of their own rather than the blend tank. */
@@ -529,6 +531,17 @@ function RecordInPims({ page }: { page: string }) {
   )
 }
 
+/** A department's batch screen: reactors and stages for a department that
+ *  settles its batches (Acid), the one-button Blend screen for one that does not. */
+function DepartmentBatches({ departmentId, orderId }: { departmentId: number; orderId?: number }) {
+  const { departments } = useApp()
+  const department = departments.find((d) => d.department_id === departmentId)
+  if (!department) return <Loading />
+  return department.methods?.includes('staged')
+    ? <ProcessOverview departmentId={departmentId} orderId={orderId} />
+    : <Blend departmentId={departmentId} initialOrderId={orderId} />
+}
+
 function Route({ path }: { path: string[] }) {
   const [page, param] = path
   switch (page) {
@@ -539,13 +552,9 @@ function Route({ path }: { path: string[] }) {
     case 'blend':
       return <Blend initialOrderId={param ? Number(param) : undefined} />
     case 'batches':
-      return (
-        <Blend
-          key={param}
-          departmentId={Number(param)}
-          initialOrderId={path[2] ? Number(path[2]) : undefined}
-        />
-      )
+      return <DepartmentBatches key={path.join('/')} departmentId={Number(param)} orderId={path[2] ? Number(path[2]) : undefined} />
+    case 'process':
+      return <ProcessBatchPage key={param} batchId={param} />
     case 'today':
       return <Today />
     case 'operations':
@@ -573,6 +582,7 @@ function titleFor(page: string): string {
     'load-ship': 'Load & ship',
     blend: 'Blend',
     batches: 'Batches',
+    process: 'Batch',
     operations: 'Plant floor',
     inventory: 'Inventory',
     inquiry: 'Inquiry',

@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from pims import db, security
-from pims.errors import ValidationError
+from pims.errors import BusinessRuleError, ValidationError
 from pims.services import blend, departments, display, orders
 
 
@@ -65,61 +65,44 @@ def test_the_acid_recipe_charges_more_than_it_makes(conn, acid_order):
     assert not plan["short"]
 
 
-def test_an_acid_batch_credits_the_order_with_the_pounds_out(conn, acid, acid_order, admin_user):
+def test_an_acid_order_is_not_blended_in_one_go(conn, acid_order, admin_user):
     plan = blend.plan(order_id=acid_order["order_id"], conn=conn)
-    before = orders.progress(acid_order["order_id"], 2, conn)["qty_fulfilled"]
-    result = blend.execute(
-        {
-            "order_id": acid_order["order_id"],
-            "plant_id": 1,
-            "material_id": plan["material_id"],
-            "quantity": plan["quantity"],
-            "to_location_id": plan["to_location_id"],
-            "components": [
-                {"material_id": c["material_id"], "from_location_id": c["from_location_id"],
-                 "quantity": c["required"]}
-                for c in plan["components"]
-            ],
-        },
-        admin_user,
-        conn,
-    )
-    assert result["batch_id"].startswith("A-")
-    assert result["quantity"] == pytest.approx(plan["quantity"], abs=0.01)
-    assert result["charged"] == pytest.approx(plan["charge"], abs=0.05)
-    rows = result["transactions"]
-    assert {r["transaction_type"] for r in rows} == {"PRODUCE"}
-    assert all(
-        db.scalar("SELECT department_id FROM inventory_transaction WHERE transaction_id = ?",
-                  (r["transaction_id"],), conn) == acid
-        for r in rows
-    )
-    after = orders.progress(acid_order["order_id"], 2, conn)["qty_fulfilled"]
-    assert after - before == pytest.approx(plan["quantity"], abs=0.01)
-    blend.void_batch(result["batch_id"], "test clean-up", admin_user, conn)
-
-
-def test_a_batch_whose_components_do_not_match_the_yield_is_refused(conn, acid_order, admin_user):
-    plan = blend.plan(order_id=acid_order["order_id"], conn=conn)
-    with pytest.raises(ValidationError) as caught:
+    assert plan["recipe"]["method"] == "staged"
+    with pytest.raises(BusinessRuleError) as caught:
         blend.execute(
             {
-                "order_id": acid_order["order_id"],
-                "plant_id": 1,
-                "material_id": plan["material_id"],
-                "quantity": plan["quantity"],
-                "to_location_id": plan["to_location_id"],
-                # Charged as if the yield were 100%: product out of nothing.
+                "order_id": acid_order["order_id"], "plant_id": 1, "material_id": plan["material_id"],
+                "quantity": plan["quantity"], "to_location_id": plan["to_location_id"],
                 "components": [
-                    {"material_id": c["material_id"], "from_location_id": c["from_location_id"],
-                     "quantity": round(c["required"] * 0.8, 2)}
+                    {"material_id": c["material_id"], "from_location_id": c["from_location_id"], "quantity": c["required"]}
                     for c in plan["components"]
                 ],
             },
             admin_user,
             conn,
         )
-    assert "80% yield" in str(caught.value)
+    assert caught.value.detail["rule"] == "staged_recipe"
+
+
+def test_a_blend_with_a_yield_refuses_components_that_do_not_add_up(conn, admin_user):
+    product = _id("SELECT material_id FROM material WHERE number = '05003'", (), conn)
+    soap = _id("SELECT material_id FROM material WHERE number = '02005'", (), conn)
+    blend.set_recipe(product, "Test yield", [{"material_id": soap, "percentage": 100}], admin_user,
+                     conn=conn, yield_pct=90)
+    try:
+        with pytest.raises(ValidationError) as caught:
+            blend.execute(
+                {
+                    "plant_id": 1, "material_id": product, "quantity": 9_000, "to_location_id": 1,
+                    # Charged as if the yield were 100%: product out of nothing.
+                    "components": [{"material_id": soap, "from_location_id": 4, "quantity": 9_000}],
+                },
+                admin_user,
+                conn,
+            )
+        assert "90% yield" in str(caught.value)
+    finally:
+        db.execute("UPDATE blend_recipe SET active = 0 WHERE material_id = ?", (product,), conn)
 
 
 @pytest.mark.parametrize("bad", [0, -5, 101])

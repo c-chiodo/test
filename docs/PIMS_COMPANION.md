@@ -158,7 +158,7 @@ through the same guard and preflight as the mirror.
 | Product limits (the companion's own data) | Kiosk mode (hidden) |
 | Today — what is waiting, each job opening read-only | |
 | Tank board and **Pop out tanks** on another screen | |
-| Today's department picker — the legacy `Department`, `PlantDepartment` and `MaterialType.Department_Id` | Acid and other batch screens (hidden) |
+| Today's department picker — the legacy `Department`, `PlantDepartment` and `MaterialType.Department_Id` | Acid and other batch screens, staged batches (hidden) |
 
 A refused action says where to make the change — "Make this change in the
 PIMS desktop application (Order Selection Menu → Load Trailer); it will appear

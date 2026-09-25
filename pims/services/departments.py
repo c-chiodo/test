@@ -51,19 +51,23 @@ def for_plant(plant_id: int, conn=None) -> list[dict[str, Any]]:
         )
     }
     vessels: dict[int, set[str]] = {}
+    methods: dict[int, set[str]] = {}
     for row in db.query(
-        "SELECT DISTINCT department_id, vessel_type FROM blend_recipe"
+        "SELECT DISTINCT department_id, vessel_type, method FROM blend_recipe"
         " WHERE active = 1 AND department_id IS NOT NULL",
         (),
         conn,
     ):
         vessels.setdefault(row["department_id"], set()).add(row["vessel_type"])
+        methods.setdefault(row["department_id"], set()).add(row["method"])
     for row in rows:
         row["open_orders"] = open_work.get(row["department_id"], 0)
         row["runs_batches"] = row["department_id"] in vessels
         # 'Blend' vessels are the Blend screen's; anything else gets a screen
         # of its own, named for the department.
         row["vessel_types"] = sorted(vessels.get(row["department_id"], ()))
+        # 'staged' batches are charged, settled and drawn off over hours.
+        row["methods"] = sorted(methods.get(row["department_id"], ()))
     return rows
 
 

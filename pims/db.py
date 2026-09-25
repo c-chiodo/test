@@ -222,6 +222,11 @@ MIGRATIONS: list[tuple[str, str, str]] = [
         "vessel_type",
         "ALTER TABLE blend_recipe ADD COLUMN vessel_type TEXT NOT NULL DEFAULT 'Blend'",
     ),
+    (
+        "blend_recipe",
+        "method",
+        "ALTER TABLE blend_recipe ADD COLUMN method TEXT NOT NULL DEFAULT 'blend'",
+    ),
 ]
 
 #: Indexes that must exist alongside the migrated columns. ``CREATE INDEX IF
