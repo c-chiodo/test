@@ -236,6 +236,7 @@ MIGRATIONS: list[tuple[str, str, str]] = [
     ("blend_recipe", "expected_tfa", "ALTER TABLE blend_recipe ADD COLUMN expected_tfa REAL"),
     ("blend_recipe_component", "grp", "ALTER TABLE blend_recipe_component ADD COLUMN grp TEXT"),
     ("order", "recipe_id", 'ALTER TABLE "order" ADD COLUMN recipe_id INTEGER'),
+    ("blend_recipe_component", "dose", "ALTER TABLE blend_recipe_component ADD COLUMN dose TEXT"),
 ]
 
 #: Indexes that must exist alongside the migrated columns. ``CREATE INDEX IF
@@ -271,6 +272,17 @@ def apply_migrations(conn: sqlite3.Connection | None = None) -> list[str]:
     if "transaction_type" in existing:
         # A type made before kinds existed is its own kind.
         conn.execute("UPDATE transaction_type SET kind = code WHERE kind = ''")
+    if (
+        "transaction_type" in existing
+        and not scalar("SELECT 1 FROM transaction_type WHERE code = 'PROD_LOAD'", (), conn)
+        and scalar("SELECT COUNT(*) FROM transaction_type", (), conn)
+    ):
+        # Blending onto the trailer, for a database made before it existed.
+        conn.execute(
+            "INSERT INTO transaction_type (transaction_type_id, code, description, kind)"
+            " SELECT COALESCE(MAX(transaction_type_id), 0) + 1, 'PROD_LOAD',"
+            " 'PROD-LOAD: blend onto a trailer', 'LOAD' FROM transaction_type"
+        )
     if "blend_recipe" in existing:
         # One active recipe per product became one per product and vessel.
         conn.execute("DROP INDEX IF EXISTS ux_recipe_material")

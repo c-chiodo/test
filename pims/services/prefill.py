@@ -242,6 +242,18 @@ def for_qc(order_id: int, conn=None) -> dict[str, Any]:
     values: dict[str, Any] = {"test_date": today_iso()}
     if load:
         values["bol_number"] = load["to_bol"]
+        # A blend dosed to pH on the trailer already has its reading.
+        dosed = db.query_one(
+            """
+            SELECT r.value FROM txn_reading r
+            JOIN inventory_transaction t ON t.transaction_id = r.transaction_id
+            WHERE t.order_id = ? AND t.to_bol = ? AND r.analyte = 'ph' AND t.voided = 0
+            ORDER BY r.transaction_id DESC LIMIT 1
+            """,
+            (order_id, load["to_bol"]), conn,
+        )
+        if dosed:
+            values["ph"] = dosed["value"]
         if load["trailer_number"]:
             values["last_material_hauled"] = last_material_hauled(
                 load["trailer_number"], conn

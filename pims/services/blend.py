@@ -65,7 +65,7 @@ def recipes(conn=None, include_inactive: bool = False) -> list[dict]:
 def _components(recipe_id: int, conn) -> list[dict]:
     return db.query(
         """
-        SELECT c.component_id, c.material_id, c.percentage, c.sort_order, c.grp,
+        SELECT c.component_id, c.material_id, c.percentage, c.sort_order, c.grp, c.dose,
                m.number AS material_number, m.description AS material_description
         FROM blend_recipe_component c
         JOIN material m ON m.material_id = c.material_id

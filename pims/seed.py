@@ -90,6 +90,9 @@ TRANSACTION_TYPES = [
     (5, "SHIP", "Ship a loaded trailer"),
     (6, "SHRINK", "Record shrinkage / loss"),
     (7, "ADJUST", "Inventory adjustment"),
+    # The legacy PROD-LOAD: components pumped from their tanks straight onto
+    # the trailer as the ordered blend. A load, by kind.
+    (8, "PROD_LOAD", "PROD-LOAD: blend onto a trailer"),
 ]
 
 # ------------------------------------------------------ specs (real data)
@@ -441,6 +444,8 @@ def _seed_recipes(conn, material_ids: dict[str, int]) -> None:
                     "material_id": material_ids[component],
                     "percentage": pct,
                     "sort_order": index * 10,
+                    # Caustic goes in against the pH, a little at a time.
+                    "dose": "ph" if component == "00003" else None,
                 },
                 conn,
             )
@@ -509,7 +514,8 @@ def _seed_reference(conn) -> None:
     for ttid, code, desc in TRANSACTION_TYPES:
         db.insert(
             "transaction_type",
-            {"transaction_type_id": ttid, "code": code, "description": desc, "kind": code},
+            {"transaction_type_id": ttid, "code": code, "description": desc,
+             "kind": "LOAD" if code == "PROD_LOAD" else code},
             conn,
         )
     for tpid, plant_id, name, desc in TEST_POINTS:

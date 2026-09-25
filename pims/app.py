@@ -26,8 +26,8 @@ from .errors import AuthError, PimsError
 from .integrations import gp_sync, lims_ingest
 from .integrations import scale as scale_integration
 from .services import (
-    alerts, blend, departments, display, inquiry, inventory, jobs, lims, numbering, orders, prefill,
-    process, qc, query, reference, scan, specs,
+    alerts, blend, departments, display, inquiry, inventory, jobs, lims, loadblend, numbering, orders,
+    prefill, process, qc, query, reference, scan, specs,
 )
 from .util import utc_now
 
@@ -120,6 +120,7 @@ LEGACY_SCREENS = [
     (r"^/api/shipments/", "Order Selection Menu → Ship Trailer"),
     (r"^/api/blend/", "Order Selection Menu → Produce"),
     (r"^/api/process/", "Order Selection Menu → Produce"),
+    (r"^/api/load-blend/", "Order Selection Menu → Load Trailer (PROD-LOAD)"),
     (r"^/api/orders/close", "Order Edit Menu → Close Selected Orders"),
     (r"^/api/orders/\d+/qc", "Quality Control → Regular QC"),
     (r"^/api/qc/", "Quality Control → Regular QC"),
@@ -731,6 +732,21 @@ def blend_plan(
 @app.post("/api/blend/execute", tags=["blend"], status_code=201)
 def blend_execute(payload: dict = Body(...), user: dict = User) -> dict:
     return blend.execute(payload, user)
+
+
+# ------------------------------------------------------ blend onto trailer
+
+
+@app.get("/api/load-blend/plan", tags=["shipping"])
+def load_blend_plan(order_id: int, quantity: float | None = None, user: dict = User) -> dict | None:
+    """The truck a blended product's recipe makes, or null for a straight load."""
+
+    return loadblend.plan(order_id, quantity)
+
+
+@app.post("/api/load-blend/{order_id}", tags=["shipping"], status_code=201)
+def load_blend(order_id: int, payload: dict = Body(...), user: dict = User) -> dict:
+    return loadblend.execute(order_id, payload, user)
 
 
 # ----------------------------------------------------------- staged batches

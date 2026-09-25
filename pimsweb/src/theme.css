@@ -962,3 +962,15 @@ body.kiosk button.big { font-size: 19px; }
 .yield-line { margin-top: 8px; font-size: 14.5px; }
 .mini-batch { font-size: 11.5px !important; font-weight: 700; color: var(--brand); }
 .tile-batch { font-size: 15px; color: #7fb0dd; }
+
+/* Blend onto the trailer: components, and the dosed one in steps. */
+.blend-rows { display: flex; flex-direction: column; gap: 8px; margin: 14px 0; }
+.blend-row { display: grid; grid-template-columns: minmax(180px, 1fr) minmax(150px, 220px) 120px auto; gap: 10px; align-items: center; }
+.blend-what { display: flex; flex-direction: column; min-width: 0; }
+@media (max-width: 700px) { .blend-row { grid-template-columns: 1fr 1fr; } .blend-what { grid-column: span 2; } }
+.dose-box { border: 1px solid var(--border-strong); border-radius: var(--radius); padding: 12px 14px; background: var(--surface-2); }
+.dose-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 6px; }
+.dose-head select { margin-left: auto; width: auto; }
+.dose-steps { margin: 10px 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; }
+.dose-steps li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.dose-steps input { width: 110px; }

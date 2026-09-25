@@ -523,7 +523,11 @@ CREATE TABLE IF NOT EXISTS blend_recipe_component (
     -- Components sharing a group are interchangeable: Soap - Gum, Soap -
     -- Degum, Wetgums and VOP wet are all "soap". For a staged recipe the
     -- percentage is pounds per 100 lbs of the first group.
-    grp          TEXT
+    grp          TEXT,
+    -- Dosed against a reading rather than weighed to the recipe: caustic
+    -- into a cattle blend is added a little at a time until the pH is in
+    -- the product's range. The recipe amount is then a starting point.
+    dose         TEXT
 );
 
 -- A reading taken on a movement — the moisture and S of oil drawn off a

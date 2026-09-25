@@ -210,7 +210,7 @@ export function prefillQc(orderId: number, validate: (id: number, payload: Row) 
   const types = byId.transactionType()
   const load = store.inventory_transaction
     .filter((txn) => txn.order_id === orderId && !txn.voided && !txn.is_reversal
-      && types.get(txn.transaction_type_id)?.code === 'LOAD')
+      && ((types.get(txn.transaction_type_id)?.kind || types.get(txn.transaction_type_id)?.code) === 'LOAD'))
     .sort((a, b) => b.transaction_id - a.transaction_id)[0]
   const previous = store.qc
     .filter((record) => record.order_id === orderId && record.active)
@@ -219,6 +219,11 @@ export function prefillQc(orderId: number, validate: (id: number, payload: Row) 
   const values: Row = { test_date: todayIso() }
   if (load) {
     values.bol_number = load.to_bol
+    // A blend dosed to pH on the trailer already has its reading.
+    const truck = new Set(store.inventory_transaction
+      .filter((t) => t.order_id === orderId && t.to_bol === load.to_bol && !t.voided).map((t) => t.transaction_id))
+    const dosed = (store.txn_reading ?? []).filter((r) => truck.has(r.transaction_id) && r.analyte === 'ph').slice(-1)[0]
+    if (dosed) values.ph = dosed.value
     if (load.trailer_number) values.last_material_hauled = lastMaterialHauled(load.trailer_number)
   }
   if (!values.last_material_hauled && previous) {

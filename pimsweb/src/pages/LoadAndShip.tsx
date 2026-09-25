@@ -440,15 +440,212 @@ function PickOrder({ onPicked }: { onPicked: (orderId: number) => void }) {
 
 /* ------------------------------------------------------------- 2. load */
 
-function LoadStep({
-  orderId, posted, preLoadDone, onCheckTrailer, onPosted,
-}: {
+interface LoadProps {
   orderId: number
   posted: any
   preLoadDone: boolean
   onCheckTrailer: () => void
   onPosted: (txn: any) => void
-}) {
+}
+
+/* A product with a recipe is blended onto the trailer (the legacy
+ * PROD-LOAD); anything else is loaded from one tank. */
+function LoadStep(props: LoadProps) {
+  const plan = useAsync(() => api.get<any>(`/api/load-blend/plan?order_id=${props.orderId}`), [props.orderId])
+  if (plan.loading) return <Loading />
+  if (plan.data && !props.posted) return <BlendLoad {...props} plan={plan.data} />
+  return <StraightLoad {...props} />
+}
+
+interface Dose { quantity: string; reading: string }
+
+/* Components from their tanks straight onto the trailer, and the dosed one
+ * — caustic — added in steps against the pH. Nothing is posted until the
+ * load is right, so nothing has to be reversed to get it right. */
+function BlendLoad({ orderId, preLoadDone, onCheckTrailer, onPosted, plan }: LoadProps & { plan: any }) {
+  const toast = useToast()
+  const draftKey = `pims.blendload.${orderId}`
+  const saved = useMemo(() => {
+    try { return JSON.parse(sessionStorage.getItem(draftKey) || 'null') } catch { return null }
+  }, [draftKey])
+  const [trailer, setTrailer] = useState<string>(saved?.trailer ?? plan.trailer_number ?? '')
+  const [truck, setTruck] = useState<string>(saved?.truck ?? String(Math.round(plan.quantity)))
+  const [picks, setPicks] = useState<Record<number, { from: number | null; qty: string }>>(() => saved?.picks
+    ?? Object.fromEntries(plan.components.map((c: any) => [c.material_id, { from: c.from_location_id, qty: String(Math.round(c.required)) }])))
+  const dosed = plan.components.find((c: any) => c.dose)
+  const [doses, setDoses] = useState<Dose[]>(() => saved?.doses
+    ?? (dosed ? [{ quantity: String(Math.round(dosed.required * 0.7)), reading: '' }] : []))
+  const [error, setError] = useState<any>(null)
+  const [busy, setBusy] = useState(false)
+  const key = useRef(newKey())
+  // A draft survives a kiosk sign-out: dosing a truck takes longer than
+  // three idle minutes, and the steps are the record of how it was done.
+  useEffect(() => {
+    try { sessionStorage.setItem(draftKey, JSON.stringify({ trailer, truck, picks, doses })) } catch { /* */ }
+  }, [trailer, truck, picks, doses])
+
+  // Re-scaled as the truck size changes; a number the operator typed stays.
+  const scaled = useAsync(
+    () => api.get<any>(`/api/load-blend/plan${qs({ order_id: orderId, quantity: Number(truck) || undefined })}`),
+    [orderId, truck], 300,
+  )
+  const current = scaled.data ?? plan
+  const [touched, setTouched] = useState<Set<number>>(new Set())
+  useEffect(() => {
+    if (!scaled.data) return
+    setPicks((p) => Object.fromEntries(scaled.data.components.map((c: any) => [c.material_id, {
+      from: p[c.material_id]?.from ?? c.from_location_id,
+      qty: touched.has(c.material_id) ? p[c.material_id]?.qty : String(Math.round(c.required)),
+    }])))
+  }, [scaled.data])
+
+  const dosedTotal = doses.reduce((a, d) => a + Number(d.quantity || 0), 0)
+  const lbs = (c: any) => (c.dose ? dosedTotal : Number(picks[c.material_id]?.qty || 0))
+  const total = current.components.reduce((a: number, c: any) => a + lbs(c), 0)
+  const last = [...doses].reverse().find((d) => d.reading !== '')
+  const target = current.target
+  const reading = last ? Number(last.reading) : null
+  const inRange = reading !== null && target
+    && (target.min === null || reading >= target.min) && (target.max === null || reading <= target.max)
+  const overLoad = error?.detail?.rule === 'over_fulfilment' ? error.detail : null
+  const outOfRange = error?.detail?.rule === 'reading_out_of_range'
+
+  async function save(acknowledge: { over?: boolean; reading?: boolean } = {}) {
+    setBusy(true); setError(null)
+    try {
+      const result = await api.post<any>(`/api/load-blend/${orderId}`, {
+        trailer_number: trailer, idempotency_key: key.current,
+        components: current.components.map((c: any) => ({
+          material_id: c.material_id, from_location_id: picks[c.material_id]?.from, quantity: lbs(c),
+        })),
+        doses: doses.filter((d) => Number(d.quantity) > 0).map((d) => ({ quantity: Number(d.quantity), reading: d.reading === '' ? null : Number(d.reading) })),
+        preload_checked: preLoadDone,
+        acknowledge_over_load: acknowledge.over, acknowledge_reading: acknowledge.reading,
+      })
+      try { sessionStorage.removeItem(draftKey) } catch { /* */ }
+      toast.push('success', `Loaded ${fmtLbs(result.from_qty)} lbs`, `BOL ${result.to_bol}`)
+      onPosted(result)
+    } catch (err) { setError(err) } finally { setBusy(false) }
+  }
+
+  return (
+    <Card title={`Blend onto the trailer — ${current.recipe.name}`}
+      subtitle="Each component from its tank straight onto the trailer. Nothing is saved until the load is right.">
+      {error && !overLoad && !outOfRange && <div style={{ marginBottom: 12 }}><ErrorBox error={error} /></div>}
+      <div className="form-grid cols-2" style={{ maxWidth: 560 }}>
+        <Field label="Trailer #"><input value={trailer} onChange={(e) => setTrailer(e.target.value)} /></Field>
+        <Field label="Pounds on this truck" hint={`${fmtLbs(current.remaining)} lbs still to load on the order`}>
+          <input type="number" inputMode="decimal" value={truck} onChange={(e) => setTruck(e.target.value)} />
+        </Field>
+      </div>
+
+      <div className="blend-rows">
+        {current.components.filter((c: any) => !c.dose).map((c: any) => (
+          <div key={c.material_id} className="blend-row">
+            <div className="blend-what">
+              <strong>{c.material_number} · {c.material_description}</strong>
+              <span className="muted small">{c.percentage}% of the blend</span>
+            </div>
+            <select value={picks[c.material_id]?.from ?? ''} aria-label={`${c.material_number} from tank`}
+              onChange={(e) => setPicks((p) => ({ ...p, [c.material_id]: { ...p[c.material_id], from: Number(e.target.value) } }))}>
+              <option value="">Tank…</option>
+              {c.tanks.map((t: any) => <option key={t.location_id} value={t.location_id}>{t.number} — {fmtLbs(t.lbs)} lbs</option>)}
+            </select>
+            <input type="number" inputMode="decimal" aria-label={`${c.material_number} pounds`}
+              value={picks[c.material_id]?.qty ?? ''}
+              onChange={(e) => { setTouched((t) => new Set(t).add(c.material_id)); setPicks((p) => ({ ...p, [c.material_id]: { ...p[c.material_id], qty: e.target.value } })) }} />
+            <span className="muted">lbs</span>
+          </div>
+        ))}
+      </div>
+
+      {dosed && (
+        <div className="dose-box">
+          <div className="dose-head">
+            <strong>{dosed.material_description}, to the {dosed.dose === 'ph' ? 'pH' : dosed.dose}</strong>
+            {target && <span className="muted"> — this product should be {target.min ?? '—'} to {target.max ?? '—'}</span>}
+            <select value={picks[dosed.material_id]?.from ?? ''} aria-label={`${dosed.material_number} from tank`}
+              onChange={(e) => setPicks((p) => ({ ...p, [dosed.material_id]: { ...p[dosed.material_id], from: Number(e.target.value) } }))}>
+              <option value="">Tank…</option>
+              {dosed.tanks.map((t: any) => <option key={t.location_id} value={t.location_id}>{t.number} — {fmtLbs(t.lbs)} lbs</option>)}
+            </select>
+          </div>
+          <div className="muted small">
+            The recipe is about {fmtLbs(dosed.required)} lbs for this truck. Add some, test, add more if it needs it —
+            each step is written here, and only the total is saved with the load.
+          </div>
+          <ol className="dose-steps">
+            {doses.map((d, i) => (
+              <li key={i}>
+                <span>Add</span>
+                <input type="number" inputMode="decimal" aria-label={`Step ${i + 1} pounds`} value={d.quantity}
+                  onChange={(e) => setDoses((all) => all.map((x, j) => (j === i ? { ...x, quantity: e.target.value } : x)))} />
+                <span>lbs, then pH</span>
+                <input type="number" inputMode="decimal" step="0.01" aria-label={`Step ${i + 1} pH`} value={d.reading}
+                  onChange={(e) => setDoses((all) => all.map((x, j) => (j === i ? { ...x, reading: e.target.value } : x)))} />
+                {d.reading !== '' && target && (
+                  (target.min === null || Number(d.reading) >= target.min) && (target.max === null || Number(d.reading) <= target.max)
+                    ? <Badge tone="ok">in range</Badge> : <Badge tone="warn">{Number(d.reading) < (target.min ?? -Infinity) ? 'low' : 'high'}</Badge>
+                )}
+                {doses.length > 1 && (
+                  <button className="ghost sm" aria-label={`Remove step ${i + 1}`} onClick={() => setDoses((all) => all.filter((_, j) => j !== i))}>✕</button>
+                )}
+              </li>
+            ))}
+          </ol>
+          <div className="row" style={{ gap: 10 }}>
+            <button className="sm" onClick={() => setDoses((all) => [...all, { quantity: '', reading: '' }])}>+ Add more {dosed.material_description.toLowerCase()}</button>
+            <span className="small">Total so far <strong>{fmtLbs(dosedTotal)} lbs</strong>{reading !== null && <> · last pH <strong>{reading}</strong></>}</span>
+          </div>
+        </div>
+      )}
+
+      {!preLoadDone && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="warn" title="The trailer has not been checked yet">
+            The questions just above are about an empty trailer, so answer them before the product goes in.
+            You can save the load anyway — it will be marked as loaded before the trailer check.
+            <div className="row" style={{ gap: 8, marginTop: 10 }}>
+              <button className="sm" onClick={onCheckTrailer}>Go to the trailer questions</button>
+            </div>
+          </Alert>
+        </div>
+      )}
+      {overLoad && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="warn" title={`This puts the order ${fmtLbs(overLoad.over_by)} lbs over`}>
+            Split loads are normal — confirm if this one is meant to go out.
+            <div className="row" style={{ gap: 8, marginTop: 10 }}>
+              <button className="sm primary" disabled={busy} onClick={() => save({ over: true })}>Yes, load it anyway</button>
+            </div>
+          </Alert>
+        </div>
+      )}
+      {outOfRange && (
+        <div style={{ marginTop: 12 }}>
+          <Alert tone="warn" title={error.message}>
+            <div className="row" style={{ gap: 8, marginTop: 10 }}>
+              <button className="sm" onClick={() => setDoses((all) => [...all, { quantity: '', reading: '' }])}>Add more</button>
+              <button className="sm primary" disabled={busy} onClick={() => save({ reading: true, over: Boolean(overLoad) })}>Load it at pH {reading}</button>
+            </div>
+          </Alert>
+        </div>
+      )}
+
+      <div className="pf-go" style={{ marginTop: 14 }}>
+        <button className="primary big" disabled={busy || !trailer.trim() || total <= 0} onClick={() => save()}>
+          {busy ? <span className="spinner" /> : null}
+          Save load: {current.components.map((c: any) => `${fmtLbs(lbs(c))} ${c.material_description}`).join(' + ')}
+          {' '}onto trailer {trailer || '—'} ({fmtLbs(total)} lbs{reading !== null ? `, pH ${reading}${inRange ? ' ✓' : ''}` : ''})
+        </button>
+      </div>
+    </Card>
+  )
+}
+
+function StraightLoad({
+  orderId, posted, preLoadDone, onCheckTrailer, onPosted,
+}: LoadProps) {
   const { plantId, reference } = useApp()
   const toast = useToast()
   const [form, setForm] = useState<Record<string, any>>({})

@@ -312,6 +312,14 @@ const OPERATIONS: Record<string, { from: boolean; to: boolean; label: string }> 
   SHIP: { from: true, to: false, label: 'Ship trailer' },
   SHRINK: { from: true, to: false, label: 'Shrinkage' },
   ADJUST: { from: false, to: true, label: 'Adjustment' },
+  // A component pumped from its tank onto the trailer as the ordered blend.
+  PROD_LOAD: { from: true, to: true, label: 'Blend onto trailer' },
+}
+
+/** What a transaction type is, whatever it is called (MOVE-LOAD is a load). */
+function kindOf(typeId: number): string | undefined {
+  const t = byId.transactionType().get(typeId)
+  return t ? (t.kind || t.code) : undefined
 }
 
 function hydrateTransaction(txn: Row): Row {
@@ -412,7 +420,7 @@ function postTransaction(operation: string, payload: Row): Row {
     if (location.plant_id !== plantId) {
       invalid(`${location.number} belongs to another plant.`, { [key]: 'Location is not at this plant.' })
     }
-    if (location.bol_required && key === 'to_location_id' && !payload.to_bol && (op === 'RECEIVE' || op === 'LOAD')) {
+    if (location.bol_required && key === 'to_location_id' && !payload.to_bol && (op === 'RECEIVE' || op === 'LOAD' || op === 'PROD_LOAD')) {
       if (setting('bol.auto_generate', 'true') !== 'false') {
         payload = { ...payload, to_bol: nextBol(payload.trailer_number) }
       } else {
@@ -678,7 +686,7 @@ function pendingShipments(plantId?: number | null, orderId?: number | null): Row
       const txn = store.inventory_transaction.find((t) => t.transaction_id === stage.transaction_id)!
       // The product on the trailer is the one that was loaded onto it, not
       // whatever the order header says.
-      const material = byId.material().get(txn.from_material_id)
+      const material = byId.material().get(txn.to_material_id)
       const ordered = byId.material().get(order.material_one_id)
       return {
         ...stage,
@@ -729,19 +737,16 @@ const PROGRESS_TYPES: Record<number, string[]> = { 1: ['LOAD'], 2: ['PRODUCE'], 
 
 function progress(order: Row): Row {
   const codes = PROGRESS_TYPES[order.order_type_id] ?? []
-  const types = byId.transactionType()
   let fulfilled = 0
   let shipped = 0
   for (const txn of store.inventory_transaction) {
     if (txn.order_id !== order.order_id || txn.voided || txn.is_reversal) continue
-    const code = types.get(txn.transaction_type_id)?.code
+    const code = kindOf(txn.transaction_type_id)
     if (code && codes.includes(code)) {
-      const incoming = code === 'RECEIVE' || code === 'PRODUCE'
-      // Only the ordered product counts. Counting every material meant a load
-      // from the wrong tank showed the order progressing.
-      const material = incoming ? txn.to_material_id : txn.from_material_id
-      if (!order.material_one_id || material === order.material_one_id) {
-        fulfilled += incoming ? txn.to_qty : txn.from_qty
+      // What arrived counts: for a load, what landed in the trailer — a
+      // blend pumped onto the truck counts as the blend the order is for.
+      if (!order.material_one_id || txn.to_material_id === order.material_one_id) {
+        fulfilled += txn.to_qty
       }
     }
     if (code === 'SHIP') shipped += txn.from_qty
@@ -984,21 +989,31 @@ function orderDetail(orderId: number): Row {
  *  order-level view and not what the driver carries. */
 function billOfLading(orderId: number, transactionId?: number | null): Row {
   const order = orderDetail(orderId)
-  const types = byId.transactionType()
-  const loads = store.inventory_transaction
-    .filter((t) => t.order_id === orderId && !t.voided
-      && types.get(t.transaction_type_id)?.code === 'LOAD'
-      && (!transactionId || t.transaction_id === Number(transactionId)))
-    .map((t) => ({
+  const one = transactionId ? store.inventory_transaction.find((t) => t.transaction_id === Number(transactionId)) : null
+  const rows = store.inventory_transaction
+    .filter((t) => t.order_id === orderId && !t.voided && kindOf(t.transaction_type_id) === 'LOAD'
+      // One truck: every component blended onto the same trailer, same BOL.
+      && (!one || (t.to_bol === one.to_bol && (t.trailer_number || '') === (one.trailer_number || ''))))
+    .sort((a, b) => a.transaction_id - b.transaction_id)
+  // One line per truck, however many components went onto it.
+  const byTruck = new Map<string, Row>()
+  for (const t of rows) {
+    const k = `${t.to_bol}|${t.trailer_number}|${t.to_material_id}`
+    const line = byTruck.get(k)
+    if (line) { line.quantity += t.to_qty; line.components += 1; continue }
+    byTruck.set(k, {
       transaction_id: t.transaction_id,
       bol_number: t.to_bol,
       trailer_number: t.trailer_number,
-      quantity: t.from_qty,
+      quantity: t.to_qty,
+      components: 1,
       transaction_date: t.transaction_date,
-      material_number: byId.material().get(t.from_material_id)?.number ?? null,
-      material_description: byId.material().get(t.from_material_id)?.description ?? null,
+      material_number: byId.material().get(t.to_material_id)?.number ?? null,
+      material_description: byId.material().get(t.to_material_id)?.description ?? null,
       loaded_by: byId.user().get(t.user_id)?.full_name ?? 'system',
-    }))
+    })
+  }
+  const loads = [...byTruck.values()]
   // The product printed is the product on the truck. If a load went out under
   // a different product from the order header, both are reported.
   const products: Row[] = []
@@ -1762,6 +1777,165 @@ function blendBatch(batchId: string): Row {
     voided: rows.every((r) => r.voided),
     transactions: rows,
   }
+}
+
+/* ------------------------------------------------- blend onto the trailer */
+
+/* pims/services/loadblend.py: components straight from their tanks onto the
+ * trailer as the ordered blend; caustic dosed to the pH on the screen, so
+ * the whole truck posts once and nothing is reversed to get it right. */
+function specRange(materialId: number, analyte: string): Row | null {
+  const row = store.material_spec.find((s) => s.material_id === materialId && s.analyte === analyte)
+  if (!row || (row.min_value === null && row.max_value === null)) return null
+  return { analyte, min: row.min_value, max: row.max_value }
+}
+
+function loadBlendPlan(orderId: number, quantity: number | null): Row | null {
+  requireUser()
+  const order = byId.order().get(orderId)
+  if (!order) return notFound(`Order ${orderId} was not found.`)
+  const recipe = recipeForMaterial(order.material_one_id, 'blend')
+  if (!recipe || !recipe.components.length) return null
+  if (recipe.components.length === 1 && recipe.components[0].material_id === order.material_one_id) return null
+  const remaining = round2(Math.max(order.material_one_quantity - progress(order).qty_fulfilled, 0))
+  const target = quantity ? round2(quantity) : remaining
+  const types = new Map(store.location_type.map((t) => [t.location_type_id, t.name]))
+  const rows = balances({ plant_id: order.plant_id, location_id: null, material_id: null, as_of: null, include_zero: false })
+  const components = (recipe.components as Row[]).map((c) => {
+    const holding = rows.filter((b: Row) => b.material_id === c.material_id && b.balance > 0.5
+      && ['Tank', 'Blend'].includes(types.get(byId.location().get(b.location_id)?.location_type_id)))
+      .sort((a: Row, b: Row) => b.balance - a.balance)
+    const required = round2(target * c.percentage / 100)
+    const tank = holding[0]
+    return {
+      material_id: c.material_id, material_number: c.material_number, material_description: c.material_description,
+      percentage: c.percentage, required, dose: c.dose ?? null,
+      from_location_id: tank?.location_id ?? null, from_location_number: tank?.location_number ?? null,
+      available: round2(tank?.balance ?? 0), short: !tank || required - tank.balance > 0.01,
+      tanks: holding.slice(0, 5).map((b: Row) => ({ location_id: b.location_id, number: b.location_number, lbs: round2(b.balance) })),
+    }
+  })
+  const dose = components.find((c) => c.dose)?.dose
+  return {
+    order_id: order.order_id, material_id: order.material_one_id,
+    recipe: { recipe_id: recipe.recipe_id, name: recipe.name, notes: recipe.notes },
+    remaining, quantity: target, components,
+    target: dose ? specRange(order.material_one_id, dose) : null,
+    trailer_number: order.trailer_number || '',
+  }
+}
+
+function blendedLoad(firstId: number): Row {
+  const first = hydrateTransaction(store.inventory_transaction.find((t) => t.transaction_id === firstId)!)
+  const rows = store.inventory_transaction
+    .filter((t) => t.to_bol === first.to_bol && (t.trailer_number || '') === (first.trailer_number || '')
+      && t.order_id === first.order_id && !t.voided && !t.is_reversal)
+    .sort((a, b) => a.transaction_id - b.transaction_id).map(hydrateTransaction)
+  const total = round2(rows.reduce((a, r) => a + Number(r.to_qty || 0), 0))
+  const ids = new Set(rows.map((r) => r.transaction_id))
+  const reading = (store.txn_reading ?? []).filter((r) => ids.has(r.transaction_id)).slice(-1)[0] ?? null
+  return {
+    ...first, from_qty: total, to_qty: total,
+    from_material_number: first.to_material_number,
+    from_location_number: `blended from ${[...new Set(rows.map((r) => r.from_location_number))].sort().join(', ')}`,
+    components: rows.map((r) => ({
+      material_number: r.from_material_number, material_description: r.from_material_description,
+      from_location_number: r.from_location_number, quantity: r.from_qty,
+    })),
+    reading: reading ? { analyte: reading.analyte, value: reading.value } : null,
+    blended: true,
+  }
+}
+
+function loadBlendExecute(orderId: number, payload: Row): Row {
+  const user = requireUser()
+  requirePermission(user, 'txn.post')
+  const order = byId.order().get(orderId)
+  if (!order) return notFound(`Order ${orderId} was not found.`)
+  requirePlant(user, order.plant_id)
+  if (order.order_type_id !== 1) invalid('Only a sales order is loaded onto a trailer.', { order_id: 'Choose a sales order.' })
+  const key = String(payload.idempotency_key ?? '').trim()
+  if (key) {
+    const first = store.inventory_transaction.find((t) => t.idempotency_key === `${key}:0`)
+    if (first) return blendedLoad(first.transaction_id)
+  }
+  const planned = loadBlendPlan(orderId, null)
+  if (!planned) refuse('This product is not blended on the trailer — load it from its tank.', { rule: 'not_blended' })
+  const specs = new Map((planned!.components as Row[]).map((c) => [c.material_id, c]))
+  const trailer = String(payload.trailer_number ?? '').trim()
+  const fields: Record<string, string> = {}
+  if (!trailer) fields.trailer_number = 'Which trailer?'
+  const doses: Row[] = (payload.doses ?? []).filter((d: Row) => Number(d.quantity || 0) > 0)
+  const rows: Row[] = []
+  for (const c of (payload.components ?? []) as Row[]) {
+    const spec = specs.get(Number(c.material_id))
+    if (!spec) { fields.components = "A component that is not in this blend's recipe."; continue }
+    let qty = Number(c.quantity || 0)
+    if (spec.dose && doses.length) qty = doses.reduce((a, d) => a + Number(d.quantity), 0)
+    if (qty <= 0) continue
+    if (!c.from_location_id) { fields.components = `Say which tank the ${spec.material_number} comes from.`; continue }
+    rows.push({ material_id: Number(c.material_id), from_location_id: Number(c.from_location_id), quantity: round2(qty), spec })
+  }
+  if (!rows.length) fields.components = fields.components ?? 'Nothing to load.'
+  if (Object.keys(fields).length) invalid('This load cannot be saved yet.', fields)
+  const total = round2(rows.reduce((a, r) => a + r.quantity, 0))
+  // The pH first: it is the one the operator can still fix.
+  const target = planned!.target
+  const lastDose = [...doses].reverse().find((d) => d.reading !== null && d.reading !== undefined && d.reading !== '')
+  const final = lastDose ? Number(lastDose.reading) : null
+  if (target && final !== null && !payload.acknowledge_reading) {
+    if ((target.min !== null && final < target.min) || (target.max !== null && final > target.max)) {
+      refuse(`The last ${target.analyte} reading is ${final}; this product should be ${target.min ?? '—'} to ${target.max ?? '—'}. `
+        + 'Add more, or confirm to load it as it is.', { rule: 'reading_out_of_range', reading: final, acknowledge_field: 'acknowledge_reading' })
+    }
+  }
+  if (!payload.acknowledge_over_load && order.material_one_quantity) {
+    const already = progress(order).qty_fulfilled
+    const over = already + total - order.material_one_quantity
+    if (over > 0.01) {
+      refuse(`Order ${order.order_id} is for ${Math.round(order.material_one_quantity).toLocaleString()} lbs and `
+        + `${Math.round(already).toLocaleString()} lbs are already loaded. This load puts it ${Math.round(over).toLocaleString()} lbs over.`,
+      { rule: 'over_fulfilment', over_by: round2(over), ordered: order.material_one_quantity, already_loaded: round2(already), acknowledge_field: 'acknowledge_over_load' })
+    }
+  }
+  // Every component must be there before anything is written.
+  for (const r of rows) {
+    const have = balanceOf(r.from_location_id, r.material_id)
+    if (r.quantity - have > 0.01) {
+      refuse(`${byId.location().get(r.from_location_id)?.number} holds ${Math.round(have).toLocaleString()} lbs of `
+        + `${r.spec.material_number} — cannot take ${Math.round(r.quantity).toLocaleString()} lbs.`, { rule: 'insufficient_stock' })
+    }
+  }
+  const trailerType = store.location_type.find((t) => t.name === 'Trailer')?.location_type_id
+  const toLocation = store.location.find((l) => l.plant_id === order.plant_id && l.active && l.location_type_id === trailerType)
+  if (!toLocation) refuse('This plant has no trailer location to load onto.', { rule: 'no_trailer_location' })
+  let bol = payload.to_bol || ''
+  const posted: Row[] = []
+  rows.forEach((r, index) => {
+    const remarks = r.spec.dose && doses.length
+      ? `Dosed to ${r.spec.dose}: ` + doses.map((d) => `+${Math.round(Number(d.quantity)).toLocaleString()} lbs -> ${r.spec.dose} ${d.reading ?? '—'}`).join('; ')
+      : ''
+    const txn = postTransaction('PROD_LOAD', {
+      order_id: orderId, plant_id: order.plant_id, department_id: order.department_id,
+      from_location_id: r.from_location_id, from_material_id: r.material_id, from_qty: r.quantity,
+      to_location_id: toLocation!.location_id, to_material_id: order.material_one_id, to_qty: r.quantity,
+      to_bol: bol || undefined, trailer_number: trailer, user_date: payload.user_date, remarks,
+      idempotency_key: key ? `${key}:${index}` : null,
+    })
+    bol = bol || txn.to_bol
+    posted.push(txn)
+    if (r.spec.dose && final !== null) {
+      store.txn_reading = store.txn_reading ?? []
+      store.txn_reading.push({ transaction_id: txn.transaction_id, analyte: r.spec.dose, value: final, source: 'entered' })
+    }
+  })
+  store.pending_shipment.push({
+    stage_id: nextId('pending_shipment', 'stage_id'), order_id: orderId, transaction_id: posted[0].transaction_id,
+    trailer_number: trailer, quantity: total, shipped: 0, cancelled: 0,
+  })
+  audit('load.blend', 'transaction', posted[0].transaction_id,
+    `Blended ${Math.round(total).toLocaleString()} lbs onto trailer ${trailer} (BOL ${bol})`, { doses }, orderId)
+  return blendedLoad(posted[0].transaction_id)
 }
 
 /* -------------------------------------------------------- staged batches */
@@ -2808,9 +2982,8 @@ function dataQuality(plantId?: number | null): Row {
   // from the records rather than from the remark the client wrote, so it holds
   // however the load was posted.
   const sevenDaysAgo = new Date(Date.now() - 7 * 86_400_000).toISOString()
-  const loadTypeId = store.transaction_type.find((t) => t.code === 'LOAD')?.transaction_type_id
   const uncheckedLoads = store.inventory_transaction
-    .filter((t) => t.transaction_type_id === loadTypeId && !t.voided && !t.is_reversal
+    .filter((t) => kindOf(t.transaction_type_id) === 'LOAD' && !t.voided && !t.is_reversal
       && t.transaction_date >= sevenDaysAgo
       && (!plantId || t.plant_id === Number(plantId))
       && !store.qa_header.some((h) => h.order_id === t.order_id && !h.voided
@@ -3442,6 +3615,10 @@ async function route(method: string, path: string, body: Row): Promise<any> {
     requirePlant(user, Number(params.plant_id))
     return openProcessBatches(Number(params.plant_id), params.department_id ? Number(params.department_id) : null)
   }
+  if (method === 'GET' && match(path, '/api/load-blend/plan')) {
+    return loadBlendPlan(Number(params.order_id), params.quantity ? Number(params.quantity) : null)
+  }
+  if ((m = match(path, '/api/load-blend/:id')) && method === 'POST') return loadBlendExecute(Number(m[0]), body)
   if (method === 'GET' && match(path, '/api/process/spur')) {
     const user = requireUser()
     requirePlant(user, Number(params.plant_id))

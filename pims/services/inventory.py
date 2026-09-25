@@ -31,6 +31,8 @@ OPERATIONS: dict[str, dict[str, Any]] = {
     "SHIP": {"needs_from": True, "needs_to": False, "label": "Ship trailer"},
     "SHRINK": {"needs_from": True, "needs_to": False, "label": "Shrinkage"},
     "ADJUST": {"needs_from": False, "needs_to": True, "label": "Adjustment"},
+    # A component pumped from its tank onto the trailer as the ordered blend.
+    "PROD_LOAD": {"needs_from": True, "needs_to": True, "label": "Blend onto trailer"},
 }
 
 TXN_SELECT = """
@@ -327,6 +329,9 @@ def post(
                 "Adjustment for that."
             )
 
+    if operation == "PROD_LOAD" and not errors and abs(round_lbs(from_qty) - round_lbs(to_qty)) > 0.01:
+        errors["to_qty"] = "What leaves the tank is what goes on the trailer."
+
     if operation in {"ADJUST", "SHRINK"} and not str(payload.get("remarks") or "").strip():
         # These are the two operations that change the books without anything
         # physically moving, so the reason is the only record of why.
@@ -349,7 +354,7 @@ def post(
                     fields={key: "Location is not at this plant."},
                 )
             if loc["bol_required"] and key == "to_location_id" and not payload.get("to_bol"):
-                if operation in {"RECEIVE", "LOAD"}:
+                if operation in {"RECEIVE", "LOAD", "PROD_LOAD"}:
                     # The BOL series is ours, so mint one rather than making an
                     # operator type it. Turn off with bol.auto_generate=false
                     # and the old "enter the BOL number" rule comes back.
@@ -643,7 +648,7 @@ def pending_shipments(
         -- whatever the order header says. They are meant to agree; when they
         -- do not, the BOL that leaves with the driver must show what is
         -- actually on the truck.
-        LEFT JOIN material m ON m.material_id = t.from_material_id
+        LEFT JOIN material m ON m.material_id = t.to_material_id
         LEFT JOIN material om ON om.material_id = o.material_one_id
         WHERE ps.shipped = 0 AND ps.cancelled = 0 AND t.voided = 0
     """
@@ -726,20 +731,26 @@ def bill_of_lading(order_id: int, conn=None, transaction_id: int | None = None) 
 
     order = orders_service.get(order_id, conn)
     sql = """
-        SELECT t.transaction_id, t.to_bol AS bol_number, t.trailer_number, t.from_qty AS quantity,
-               t.transaction_date, m.number AS material_number, m.description AS material_description,
-               u.full_name AS loaded_by
+        SELECT MIN(t.transaction_id) AS transaction_id, t.to_bol AS bol_number, t.trailer_number,
+               SUM(t.to_qty) AS quantity, MIN(t.transaction_date) AS transaction_date,
+               m.number AS material_number, m.description AS material_description,
+               u.full_name AS loaded_by, COUNT(*) AS components
         FROM inventory_transaction t
         JOIN transaction_type tt ON tt.transaction_type_id = t.transaction_type_id
         JOIN app_user u ON u.user_id = t.user_id
-        LEFT JOIN material m ON m.material_id = t.from_material_id
+        LEFT JOIN material m ON m.material_id = t.to_material_id
         WHERE t.order_id = ? AND tt.kind = 'LOAD' AND t.voided = 0
     """
     params: list[Any] = [order_id]
     if transaction_id:
-        sql += " AND t.transaction_id = ?"
-        params.append(transaction_id)
-    loads = db.query(sql + " ORDER BY t.transaction_id", params, conn)
+        # One truck: the load row and every component blended onto the same
+        # trailer under the same BOL.
+        sql += """ AND t.to_bol = (SELECT x.to_bol FROM inventory_transaction x WHERE x.transaction_id = ?)
+                   AND COALESCE(t.trailer_number, '') = (SELECT COALESCE(x.trailer_number, '')
+                       FROM inventory_transaction x WHERE x.transaction_id = ?)"""
+        params.extend([transaction_id, transaction_id])
+    # One line per truck, however many components went onto it.
+    loads = db.query(sql + " GROUP BY t.to_bol, t.trailer_number, t.to_material_id ORDER BY 1", params, conn)
     qc_rows = db.query(
         "SELECT qc_id, sample_number, seal_number, bol_number, test_date"
         " FROM qc WHERE order_id = ? AND active = 1 ORDER BY qc_id DESC",
