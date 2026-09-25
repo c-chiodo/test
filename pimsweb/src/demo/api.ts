@@ -2409,7 +2409,9 @@ function queryParams(path: string): Row {
  * permissions held by nobody, the write-only screens hidden. */
 function companionPreview(): boolean {
   try {
-    if (window.location.hash.includes('companion')) localStorage.setItem('pims.companion', '1')
+    // Remembered once chosen; #standalone switches the preview back off.
+    if (window.location.hash.includes('standalone')) localStorage.removeItem('pims.companion')
+    else if (window.location.hash.includes('companion')) localStorage.setItem('pims.companion', '1')
     return localStorage.getItem('pims.companion') === '1'
   } catch {
     return window.location.hash.includes('companion')
