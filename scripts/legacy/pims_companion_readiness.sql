@@ -323,3 +323,16 @@ SELECT COUNT(*) AS readable_user_rows FROM FECoreData.dbo.[User];
 -- "Invalid object" or "permission denied" is fine: transactions are then
 -- attributed to "Legacy user <id>" instead of a name.
 
+PRINT '========== 8. What the transaction types are called ==========';
+SELECT * FROM dbo.[TransType];
+-- The mirror reads what each type is from its name (PROD-LOAD and MOVE-LOAD
+-- are loads, SHIP-LEAVE a ship, REVERSAL undoes its parent). Send this back
+-- so any name it does not recognise can be added.
+
+PRINT '========== 9. Are quantities out of a location stored negative? ==========';
+SELECT TOP 20 Transaction_id, Transtype_id, From_qty, To_qty, Parent_transaction_id
+FROM dbo.[transaction]
+ORDER BY Transaction_id DESC;
+-- The exports show From_Qty negative (-4689 out, +4689 in). The mirror
+-- measures this on every sync, but these 20 rows show it plainly.
+

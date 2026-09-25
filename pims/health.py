@@ -272,7 +272,7 @@ def data_quality(plant_id: int | None = None, conn=None) -> dict[str, Any]:
         JOIN "order" o ON o.order_id = t.order_id
         JOIN plant p ON p.plant_id = o.plant_id
         JOIN app_user u ON u.user_id = t.user_id
-        WHERE tt.code = 'LOAD' AND t.voided = 0 AND t.is_reversal = 0
+        WHERE tt.kind = 'LOAD' AND t.voided = 0 AND t.is_reversal = 0
           AND t.transaction_date >= datetime('now', '-7 days')
           AND NOT EXISTS (
               SELECT 1 FROM qa_header h

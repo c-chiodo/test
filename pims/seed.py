@@ -444,7 +444,7 @@ def _seed_reference(conn) -> None:
     for ttid, code, desc in TRANSACTION_TYPES:
         db.insert(
             "transaction_type",
-            {"transaction_type_id": ttid, "code": code, "description": desc},
+            {"transaction_type_id": ttid, "code": code, "description": desc, "kind": code},
             conn,
         )
     for tpid, plant_id, name, desc in TEST_POINTS:

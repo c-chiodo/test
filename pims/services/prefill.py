@@ -82,7 +82,7 @@ def trailer_history(trailer_number: str, limit: int = 5, conn=None) -> list[dict
         LEFT JOIN customer c ON c.customer_id = o.customer_id
         WHERE TRIM(t.trailer_number) = TRIM(?)
           AND t.voided = 0 AND t.is_reversal = 0
-          AND tt.code IN ('LOAD', 'SHIP')
+          AND tt.kind IN ('LOAD', 'SHIP')
         ORDER BY t.transaction_id DESC
         LIMIT ?
         """,
@@ -226,7 +226,7 @@ def for_qc(order_id: int, conn=None) -> dict[str, Any]:
         SELECT t.to_bol, t.trailer_number
         FROM inventory_transaction t
         JOIN transaction_type tt ON tt.transaction_type_id = t.transaction_type_id
-        WHERE t.order_id = ? AND tt.code = 'LOAD' AND t.voided = 0 AND t.is_reversal = 0
+        WHERE t.order_id = ? AND tt.kind = 'LOAD' AND t.voided = 0 AND t.is_reversal = 0
         ORDER BY t.transaction_id DESC LIMIT 1
         """,
         (order_id,),

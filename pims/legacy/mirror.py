@@ -60,15 +60,40 @@ UNKNOWN_USER_ID = 0
 
 TERMINAL_WORDS = ("closed", "cancel", "void", "deleted", "inactive")
 
+#: What each legacy transaction type is, from its name. First match wins, so
+#: the order matters: the real PIMS has MOVE-LOAD and PROD-LOAD (loads, not
+#: moves or production), SHIPADJ (an adjustment, not a shipment), and a type
+#: called REVERSAL that undoes its parent row.
 TYPE_WORDS = [
+    ("REVERSAL", ("revers",)),
+    ("ADJUST", ("adj", "count", "correct")),
+    ("LOAD", ("load",)),
     ("RECEIVE", ("receiv", "receipt")),
     ("PRODUCE", ("produc", "blend", "manufact")),
-    ("MOVE", ("move", "transfer")),
-    ("LOAD", ("load",)),
     ("SHIP", ("ship",)),
+    ("MOVE", ("move", "transfer", "trf")),
     ("SHRINK", ("shrink", "loss")),
-    ("ADJUST", ("adjust", "count", "correct")),
 ]
+
+#: A reading typed into a remark: "M=2.44 S=0.1", "M-1.71 S-0.3", "M= 1.60 S= 0.1".
+#: Only the labelled form is read; a bare "2.12/0.25" is ambiguous (which is
+#: moisture?) and is left in the remark.
+READING_PATTERNS = {
+    "moisture": re.compile(r"(?<![A-Za-z])M\s*[=:-]\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
+    "spintest": re.compile(r"(?<![A-Za-z])S\s*[=:-]\s*(\d+(?:\.\d+)?)", re.IGNORECASE),
+}
+
+
+def readings_from_remark(remark: str) -> dict[str, float]:
+    found: dict[str, float] = {}
+    for analyte, pattern in READING_PATTERNS.items():
+        match = pattern.search(remark or "")
+        if match:
+            try:
+                found[analyte] = float(match.group(1))
+            except ValueError:
+                pass
+    return found
 
 
 # ----------------------------------------------------------------- values
@@ -132,6 +157,11 @@ class _Transforms:
         self.taken: dict[str, set[str]] = {}
         self.type_codes: set[str] = set()
         self.unclassified_types: list[dict[str, Any]] = []
+        # -1 when the legacy database stores quantities leaving a location as
+        # negative numbers (see _from_qty_sign); the local ledger stores them
+        # positive and subtracts.
+        self.from_sign = 1
+        self.readings: list[tuple[int, str, float]] = []
 
     def _taken(self, key: str) -> set[str]:
         return self.taken.setdefault(key, set())
@@ -162,7 +192,8 @@ class _Transforms:
 
     def t_transaction_type(self, row):
         name = row.pop("name", "") or ""
-        code = classify_type(name)
+        kind = classify_type(name)
+        code = kind
         if code is None or code in self.type_codes:
             if code is None:
                 self.unclassified_types.append(
@@ -172,6 +203,9 @@ class _Transforms:
         self.type_codes.add(code)
         row["code"] = code
         row["description"] = name or code
+        # Several legacy types share a kind (MOVE-LOAD and PROD-LOAD are both
+        # loads); the code stays unique, the kind is what the rules read.
+        row["kind"] = kind or code
         return row
 
     def t_material(self, row):
@@ -202,6 +236,10 @@ class _Transforms:
         row["user_date"] = (row.get("user_date") or row.get("transaction_date") or "")[:10]
         row["voided"] = 0
         row["is_reversal"] = 0
+        if self.from_sign < 0 and row.get("from_qty") not in (None, ""):
+            row["from_qty"] = -float(row["from_qty"])
+        for analyte, value in readings_from_remark(row["remarks"]).items():
+            self.readings.append((row["transaction_id"], analyte, value))
         return row
 
     def t_pending_shipment(self, row):
@@ -338,6 +376,12 @@ def run(
     transforms = _Transforms()
     report: dict[str, Any] = {"full": full, "started_at": utc_now_iso(), "tables": {}}
 
+    txn = resolution.tables.get("transaction")
+    if txn is not None and txn.usable:
+        sign = _from_qty_sign(legacy, txn)
+        transforms.from_sign = -1 if sign["negative"] else 1
+        report["from_qty_sign"] = sign
+
     conn.execute("PRAGMA foreign_keys = OFF")
     try:
         with db.transaction(conn):
@@ -348,6 +392,8 @@ def run(
                 report["tables"][key] = _mirror_table(
                     key, res, legacy, transforms, conn, full=full, window_days=window_days
                 )
+            report["reversals"] = _link_reversals(conn)
+            report["readings_from_remarks"] = _store_readings(transforms.readings, conn)
             report["placeholder_users"] = _placeholder_users(conn)
             report["specs_applied"] = _apply_known_specs(conn)
             report["unclassified_transaction_types"] = transforms.unclassified_types
@@ -441,6 +487,99 @@ def _mirror_table(key, res, legacy, transforms, conn, *, full, window_days) -> d
         "from_id": low,
         "local_rows": db.scalar(f'SELECT COUNT(*) FROM "{table.local}"', (), conn),
     }
+
+
+def _from_qty_sign(legacy: ReadOnlyConnection, res: TableResolution) -> dict[str, Any]:
+    """Does the legacy database store quantities leaving a location as
+    negative numbers?
+
+    Both of the legacy exports show them negative (a PRODUCED row reads
+    From_Qty -4689, To_Qty 4689, and its reversal +4689). Whether that is how
+    the rows are stored, or only how the export shows them, is not visible
+    from outside — so it is measured: the most recent rows with a from
+    quantity, read by primary key (cheap on the clustered index). Nine in ten
+    negative and the mirror flips them; the local ledger keeps them positive.
+    """
+
+    column = res.columns.get("from_qty")
+    id_column = next(
+        (legacy_col for local, legacy_col in res.columns.items() if local == "transaction_id"), None,
+    )
+    if not column or not id_column or not res.readable:
+        return {"sampled": 0, "negative": False}
+    physical = res.readable[0]
+    if legacy.dialect == "mssql":
+        sql = (f"SELECT TOP 2000 [{column}] AS q FROM {physical} "
+               f"WHERE [{column}] <> 0 ORDER BY [{id_column}] DESC")
+    else:
+        sql = (f"SELECT [{column}] AS q FROM {physical} "
+               f"WHERE [{column}] <> 0 ORDER BY [{id_column}] DESC LIMIT 2000")
+    values = [row["q"] for row in legacy.rows(sql)]
+    below = sum(1 for v in values if v is not None and float(v) < 0)
+    return {
+        "sampled": len(values),
+        "below_zero": below,
+        "negative": bool(values) and below >= 0.9 * len(values),
+    }
+
+
+def _link_reversals(conn) -> dict[str, int]:
+    """Turn legacy REVERSAL rows into the local shape.
+
+    The legacy PIMS undoes a posting with a new row of type REVERSAL whose
+    parent is the row it undoes — which is where the export's "PRODUCED -
+    REVERSAL" and "PROD-LOAD - REVERSAL" names come from. Locally a reversal
+    carries its parent's type and is_reversal = 1, and the parent is marked
+    voided, so an order's progress stops counting a posting that was undone.
+    Balances were right either way: both rows are summed.
+    """
+
+    reversal_types = [
+        r["transaction_type_id"]
+        for r in db.query("SELECT transaction_type_id FROM transaction_type WHERE kind = 'REVERSAL'", (), conn)
+    ]
+    if not reversal_types:
+        return {"reversals": 0, "voided": 0}
+    marks = ", ".join("?" for _ in reversal_types)
+    db.execute(
+        f"""
+        UPDATE inventory_transaction
+        SET is_reversal = 1,
+            transaction_type_id = COALESCE(
+                (SELECT p.transaction_type_id FROM inventory_transaction p
+                 WHERE p.transaction_id = inventory_transaction.parent_transaction_id),
+                transaction_type_id)
+        WHERE transaction_type_id IN ({marks}) AND parent_transaction_id IS NOT NULL
+        """,
+        reversal_types,
+        conn,
+    )
+    voided = db.affected(
+        """
+        UPDATE inventory_transaction SET voided = 1
+        WHERE voided = 0 AND transaction_id IN (
+            SELECT parent_transaction_id FROM inventory_transaction
+            WHERE is_reversal = 1 AND parent_transaction_id IS NOT NULL)
+        """,
+        (),
+        conn,
+    )
+    return {
+        "reversals": db.scalar("SELECT COUNT(*) FROM inventory_transaction WHERE is_reversal = 1", (), conn),
+        "newly_voided": voided,
+    }
+
+
+def _store_readings(readings: list[tuple[int, str, float]], conn) -> int:
+    if not readings:
+        return 0
+    db.executemany(
+        "INSERT OR REPLACE INTO txn_reading (transaction_id, analyte, value, source)"
+        " VALUES (?, ?, ?, 'remarks')",
+        readings,
+        conn,
+    )
+    return len(readings)
 
 
 def _placeholder_users(conn) -> int:

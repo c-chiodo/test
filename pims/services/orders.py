@@ -153,22 +153,23 @@ def progress(order_id: int, order_type_id: int, conn=None) -> dict[str, Any]:
     material_id = db.scalar(
         'SELECT material_one_id FROM "order" WHERE order_id = ?', (order_id,), conn
     )
+    # What arrived counts: the pounds received, produced, moved or put on
+    # the trailer, of the ordered product. A load is counted by what landed
+    # in the trailer, not by what left the tank — a legacy PROD-LOAD blends
+    # MGR, water and caustic straight onto the truck, and it is the blend on
+    # the truck the customer ordered.
     material_clause = ""
     material_params: list[Any] = []
     if material_id:
-        material_clause = """
-          AND (CASE WHEN tt.code = 'RECEIVE' OR tt.code = 'PRODUCE'
-                    THEN t.to_material_id ELSE t.from_material_id END) = ?
-        """
+        material_clause = " AND t.to_material_id = ?"
         material_params = [material_id]
     fulfilled = db.scalar(
         f"""
-        SELECT COALESCE(SUM(CASE WHEN tt.code = 'RECEIVE' OR tt.code = 'PRODUCE'
-                                 THEN t.to_qty ELSE t.from_qty END), 0)
+        SELECT COALESCE(SUM(t.to_qty), 0)
         FROM inventory_transaction t
         JOIN transaction_type tt ON tt.transaction_type_id = t.transaction_type_id
         WHERE t.order_id = ? AND t.voided = 0 AND t.is_reversal = 0
-          AND tt.code IN ({marks})
+          AND tt.kind IN ({marks})
           {material_clause}
         """,
         [order_id, *codes, *material_params],
@@ -179,7 +180,7 @@ def progress(order_id: int, order_type_id: int, conn=None) -> dict[str, Any]:
         SELECT COALESCE(SUM(t.from_qty), 0)
         FROM inventory_transaction t
         JOIN transaction_type tt ON tt.transaction_type_id = t.transaction_type_id
-        WHERE t.order_id = ? AND t.voided = 0 AND t.is_reversal = 0 AND tt.code = 'SHIP'
+        WHERE t.order_id = ? AND t.voided = 0 AND t.is_reversal = 0 AND tt.kind = 'SHIP'
         """,
         (order_id,),
         conn,

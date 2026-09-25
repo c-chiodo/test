@@ -34,7 +34,8 @@ OPERATIONS: dict[str, dict[str, Any]] = {
 }
 
 TXN_SELECT = """
-    SELECT t.*, tt.code AS transaction_type, tt.description AS transaction_description,
+    SELECT t.*, tt.code AS transaction_type, tt.kind AS transaction_kind,
+           tt.description AS transaction_description,
            p.code AS plant_code, u.username, u.full_name,
            fm.number AS from_material_number, fm.description AS from_material_description,
            tm.number AS to_material_number, tm.description AS to_material_description,
@@ -592,13 +593,14 @@ def void(transaction_id: int, reason: str, user: dict, conn=None) -> dict:
         # must not appear on the ship list — and must not be recorded as
         # shipped either. Voiding a SHIP puts the stage back on the list,
         # because the trailer is still sitting at the dock.
-        if original["transaction_type"] == "LOAD":
+        kind = original.get("transaction_kind") or original["transaction_type"]
+        if kind == "LOAD":
             db.execute(
                 "UPDATE pending_shipment SET cancelled = 1 WHERE transaction_id = ?",
                 (transaction_id,),
                 conn,
             )
-        elif original["transaction_type"] == "SHIP" and original["parent_transaction_id"]:
+        elif kind == "SHIP" and original["parent_transaction_id"]:
             db.execute(
                 "UPDATE pending_shipment SET shipped = 0 WHERE transaction_id = ? AND cancelled = 0",
                 (original["parent_transaction_id"],),
@@ -731,7 +733,7 @@ def bill_of_lading(order_id: int, conn=None, transaction_id: int | None = None) 
         JOIN transaction_type tt ON tt.transaction_type_id = t.transaction_type_id
         JOIN app_user u ON u.user_id = t.user_id
         LEFT JOIN material m ON m.material_id = t.from_material_id
-        WHERE t.order_id = ? AND tt.code = 'LOAD' AND t.voided = 0
+        WHERE t.order_id = ? AND tt.kind = 'LOAD' AND t.voided = 0
     """
     params: list[Any] = [order_id]
     if transaction_id:
@@ -808,7 +810,8 @@ def activity(
         sql += " AND (t.from_material_id = ? OR t.to_material_id = ?)"
         params.extend([material_id, material_id])
     if operation:
-        sql += " AND tt.code = ?"
+        # The kind, so asking for loads finds PROD-LOAD and MOVE-LOAD too.
+        sql += " AND tt.kind = ?"
         params.append(operation.upper())
     if date_from:
         sql += " AND t.user_date >= ?"

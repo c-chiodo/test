@@ -34,11 +34,16 @@ def _load_builder():
     return module
 
 
+SYNTHETIC: dict = {}
+
+
 @pytest.fixture()
 def standin(tmp_path, conn) -> Path:
     """A ProductionData stand-in built from the seeded test database."""
 
-    _load_builder().build(conn, tmp_path / "legacy")
+    counts = _load_builder().build(conn, tmp_path / "legacy")
+    SYNTHETIC.clear()
+    SYNTHETIC.update(counts["synthetic"])
     return tmp_path / "legacy"
 
 
@@ -252,13 +257,19 @@ def test_mirrored_balances_match_the_source_exactly(conn, legacy, legacy_map, lo
     source = {(r["loc"], r["mat"]): r["b"] for r in db.query(BALANCES, (), conn)}
     mirrored = {(r["loc"], r["mat"]): r["b"] for r in db.query(BALANCES, (), local)}
     mirrored.pop((99999, 8), None)      # the orphan the stand-in adds on purpose
+    # And the PROD-LOAD order it adds on top of the source.
+    for key, delta in SYNTHETIC["balances"].items():
+        source[key] = round(source.get(key, 0) + delta, 2)
+        if abs(source[key]) < 0.005:
+            source.pop(key)
     assert mirrored == source
 
 
 def test_archived_transactions_are_mirrored_with_the_live_ones(conn, legacy, legacy_map, local):
     _sync(legacy, legacy_map, local)
     source = db.scalar("SELECT COUNT(*) FROM inventory_transaction", (), conn)
-    assert db.scalar("SELECT COUNT(*) FROM inventory_transaction", (), local) == source + 1
+    # + the orphan, + four PROD-LOAD rows (three loads and a reversal)
+    assert db.scalar("SELECT COUNT(*) FROM inventory_transaction", (), local) == source + 5
 
 
 def test_legacy_quirks_are_reported_not_hidden(legacy, legacy_map, local):
@@ -267,6 +278,105 @@ def test_legacy_quirks_are_reported_not_hidden(legacy, legacy_map, local):
     assert [t["name"] for t in report["unclassified_transaction_types"]] == ["Tote Fill"]
     codes = {r["code"] for r in db.query("SELECT code FROM transaction_type", (), local)}
     assert {"RECEIVE", "PRODUCE", "MOVE", "LOAD", "SHIP", "SHRINK", "ADJUST"} <= codes
+
+
+def test_legacy_type_names_are_read_for_what_they_are(legacy, legacy_map, local):
+    _sync(legacy, legacy_map, local)
+    kinds = {r["description"]: r["kind"] for r in db.query("SELECT description, kind FROM transaction_type", (), local)}
+    assert kinds["MOVE-LOAD"] == "LOAD"        # a load, although it says MOVE
+    assert kinds["PROD-LOAD"] == "LOAD"
+    assert kinds["SHIP-LEAVE"] == "SHIP"
+    assert kinds["SHIPADJ"] == "ADJUST"
+    assert kinds["MOVEMENT"] == "MOVE"
+    assert kinds["RECEIVED"] == "RECEIVE" and kinds["PRODUCED"] == "PRODUCE"
+    assert kinds["REVERSAL"] == "REVERSAL"
+    for kind, words in mirror.TYPE_WORDS:
+        assert mirror.classify_type(kind) == kind or kind in {"REVERSAL"}
+    assert mirror.classify_type("MOVE-TRF") == "MOVE"
+    assert mirror.classify_type("SHIPMENT") == "SHIP"
+
+
+def test_negative_from_quantities_are_detected_and_normalised(legacy, legacy_map, local):
+    report = _sync(legacy, legacy_map, local)
+    assert report["from_qty_sign"]["negative"] is True
+    # Stored locally as positive pounds out, like every local row.
+    assert db.scalar("SELECT COUNT(*) FROM inventory_transaction WHERE from_qty < 0 AND is_reversal = 0", (), local) == 0
+
+
+def test_a_stand_in_with_positive_from_quantities_mirrors_the_same(tmp_path, conn, legacy_map, local):
+    folder = tmp_path / "positive"
+    _load_builder().build(conn, folder, negative_from=False)
+    connection = connect_sqlite(str(folder / "ProductionData.db"), str(folder / "FECoreData.db"))
+    try:
+        report = _sync(connection, legacy_map, local)
+    finally:
+        connection.close()
+    assert report["from_qty_sign"]["negative"] is False
+    source = {(r["loc"], r["mat"]): r["b"] for r in db.query(BALANCES, (), conn)}
+    mirrored = {(r["loc"], r["mat"]): r["b"] for r in db.query(BALANCES, (), local)}
+    for key in list(SYNTHETIC.get("balances", {})) + [(99999, 8)]:
+        mirrored.pop(key, None)
+        source.pop(key, None)
+    assert mirrored == source
+
+
+def test_a_legacy_reversal_voids_its_parent_and_stops_counting(standin, legacy, legacy_map, local):
+    report = _sync(legacy, legacy_map, local)
+    assert report["reversals"]["reversals"] >= 1
+    parent = db.query_one("SELECT voided, transaction_type_id FROM inventory_transaction WHERE transaction_id = 9000004", (), local)
+    child = db.query_one("SELECT is_reversal, transaction_type_id FROM inventory_transaction WHERE transaction_id = 9000005", (), local)
+    assert parent["voided"] == 1 and child["is_reversal"] == 1
+    # The reversal carries what it reversed: "PROD-LOAD - REVERSAL".
+    assert child["transaction_type_id"] == parent["transaction_type_id"]
+    # A second sync re-reads the recent rows and must not undo any of that.
+    _sync(legacy, legacy_map, local)
+    assert db.scalar("SELECT voided FROM inventory_transaction WHERE transaction_id = 9000004", (), local) == 1
+
+
+def test_a_prod_load_counts_toward_the_sales_order_it_loaded(standin, legacy, legacy_map, local):
+    from pims.services import orders
+
+    _sync(legacy, legacy_map, local)
+    got = orders.progress(SYNTHETIC["order_id"], 1, local)
+    # 20,000 + 24,000 onto the trailer; the reversed 1,000 does not count.
+    assert got["qty_fulfilled"] == pytest.approx(SYNTHETIC["loaded"])
+
+
+def test_every_order_progresses_the_same_in_the_mirror_as_in_the_source(conn, legacy, legacy_map, local):
+    from pims.services import orders
+
+    _sync(legacy, legacy_map, local)
+    rows = db.query(
+        'SELECT order_id, order_type_id FROM "order" WHERE order_type_id IN (1, 2, 3) ORDER BY order_id DESC LIMIT 150',
+        (), conn,
+    )
+    for row in rows:
+        want = orders.progress(row["order_id"], row["order_type_id"], conn)
+        got = orders.progress(row["order_id"], row["order_type_id"], local)
+        assert got["qty_fulfilled"] == pytest.approx(want["qty_fulfilled"]), row
+        assert got["qty_shipped"] == pytest.approx(want["qty_shipped"]), row
+
+
+def test_readings_typed_into_remarks_are_lifted_out(standin, legacy, legacy_map, local):
+    report = _sync(legacy, legacy_map, local)
+    assert report["readings_from_remarks"] >= 2
+    got = {r["analyte"]: r["value"] for r in db.query(
+        "SELECT analyte, value FROM txn_reading WHERE transaction_id = ?", (SYNTHETIC["reading_transaction"],), local)}
+    assert got == {"moisture": 0.84, "spintest": 0.1}
+
+
+@pytest.mark.parametrize("remark, expected", [
+    ("M=2.44 S=0.1", {"moisture": 2.44, "spintest": 0.1}),
+    ("M-1.71 S-0.3", {"moisture": 1.71, "spintest": 0.3}),
+    ("M= 1.60 S= 0.1", {"moisture": 1.60, "spintest": 0.1}),
+    ("S=0.2M=3.16", {"moisture": 3.16, "spintest": 0.2}),
+    ("M=0.49/S=0.1", {"moisture": 0.49, "spintest": 0.1}),
+    ("2.12/0.25", {}),                 # ambiguous: left in the remark
+    ("TANK FARM", {}),
+    ("moved to wrong tank upon receipt", {}),
+])
+def test_remark_readings(remark, expected):
+    assert mirror.readings_from_remark(remark) == expected
 
 
 def test_statuses_that_end_an_order_are_recognised_by_name(legacy, legacy_map, local):
@@ -304,23 +414,23 @@ def test_new_legacy_rows_arrive_on_the_next_sync(standin, legacy, legacy_map, lo
     app = _writable(standin)
     app.execute(
         "INSERT INTO [transaction] ([Transaction_id], [Transtype_id], [Plant_id], [Transaction_date],"
-        " [User_id], [To_location_id], [To_material_id], [To_qty]) VALUES (9000002, 1, 1, '2026-09-25', 1, 5, 8, 750)"
+        " [User_id], [To_location_id], [To_material_id], [To_qty]) VALUES (9000010, 1, 1, '2026-09-25', 1, 5, 8, 750)"
     )
     app.commit()
     app.close()
     _sync(legacy, legacy_map, local)
-    row = db.query_one("SELECT to_qty FROM inventory_transaction WHERE transaction_id = 9000002", (), local)
+    row = db.query_one("SELECT to_qty FROM inventory_transaction WHERE transaction_id = 9000010", (), local)
     assert row["to_qty"] == 750
 
 
 def test_an_edit_to_a_recent_row_is_picked_up(standin, legacy, legacy_map, local):
     _sync(legacy, legacy_map, local)
     app = _writable(standin)
-    app.execute("UPDATE [transaction] SET [Remarks] = 'corrected in PIMS' WHERE [Transaction_id] = 9000001")
+    app.execute("UPDATE [transaction] SET [Remarks] = 'corrected in PIMS' WHERE [Transaction_id] = 9000005")
     app.commit()
     app.close()
     _sync(legacy, legacy_map, local)
-    remarks = db.scalar("SELECT remarks FROM inventory_transaction WHERE transaction_id = 9000001", (), local)
+    remarks = db.scalar("SELECT remarks FROM inventory_transaction WHERE transaction_id = 9000005", (), local)
     assert remarks == "corrected in PIMS"
 
 

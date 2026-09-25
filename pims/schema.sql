@@ -203,7 +203,12 @@ CREATE INDEX IF NOT EXISTS ix_order_status    ON "order" (status_id);
 CREATE TABLE IF NOT EXISTS transaction_type (
     transaction_type_id INTEGER PRIMARY KEY,
     code                TEXT NOT NULL UNIQUE,  -- RECEIVE|PRODUCE|MOVE|LOAD|SHIP|SHRINK|ADJUST
-    description         TEXT NOT NULL
+    description         TEXT NOT NULL,
+    -- What the movement *is*, whatever it is called. The legacy PIMS has
+    -- PROD-LOAD and MOVE-LOAD (both loads), SHIP-LEAVE and SHIPMENT (both
+    -- ships), MOVEMENT and MOVE-TRF (both moves); every rule that asks "is
+    -- this a load?" asks the kind, never the name.
+    kind                TEXT NOT NULL DEFAULT ''
 );
 
 -- Append-only. Corrections are reversing entries, never UPDATEs: the legacy
@@ -489,6 +494,19 @@ CREATE TABLE IF NOT EXISTS blend_recipe_component (
     material_id  INTEGER NOT NULL REFERENCES material(material_id),
     percentage   REAL NOT NULL,
     sort_order   INTEGER NOT NULL DEFAULT 0
+);
+
+-- A reading taken on a movement — the moisture and S of oil drawn off a
+-- settle, say. The legacy screens had nowhere to put these, so operators
+-- typed "M=2.44 S=0.1" into Remarks on thousands of rows; the mirror lifts
+-- them out of the remark into here (source 'remarks'), and new screens write
+-- them directly (source 'entered').
+CREATE TABLE IF NOT EXISTS txn_reading (
+    transaction_id INTEGER NOT NULL REFERENCES inventory_transaction(transaction_id),
+    analyte        TEXT NOT NULL,
+    value          REAL NOT NULL,
+    source         TEXT NOT NULL DEFAULT 'entered',
+    PRIMARY KEY (transaction_id, analyte)
 );
 
 -- A staged batch in a vessel: soap charged, acid added, mixed, settled and
