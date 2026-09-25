@@ -438,6 +438,11 @@ function ReceiveJob({ orderId }: { orderId?: number }) {
   // The tank already holding this product, with the most room, is the
   // obvious one; failing that, an empty tank. Suggested, never forced.
   const need = Number(qty || 0)
+  // The plant's receiving location for this conveyance: the car on the spur.
+  const onVehicle = reference.locations
+    .filter((l) => l.plant_id === plantId && l.location_type === 'Receiving')
+    .sort((a, b) => Number(b.number.toUpperCase().includes(conveyance === 'Railcar' ? 'RAIL' : 'TRUCK'))
+      - Number(a.number.toUpperCase().includes(conveyance === 'Railcar' ? 'RAIL' : 'TRUCK')))[0]
   const suggested = useMemo(() => {
     if (!materialId) return null
     // Only a tank that can take the whole delivery is suggested.
@@ -450,7 +455,7 @@ function ReceiveJob({ orderId }: { orderId?: number }) {
     if (!order) return
     setQty(String(Math.round(remaining * 100) / 100))
     setTank(null)
-    setConveyance(/rail/i.test(order.ship_method || '') ? 'Railcar' : 'Truck')
+    setConveyance(/^RL|rail/i.test(order.ship_method || '') ? 'Railcar' : 'Truck')
   }, [picked, orders.data])
   // One truck expected: that is the one that arrived.
   useEffect(() => { if (picked === null && open.length === 1) setPicked(open[0].order_id) }, [orders.data])
@@ -488,7 +493,7 @@ function ReceiveJob({ orderId }: { orderId?: number }) {
                 <span>{o.material_one_number} · {o.material_one_description}</span>
                 <span className="muted">
                   {fmtLbs(o.material_one_quantity - o.qty_fulfilled)} lbs expected
-                  {/rail/i.test(o.ship_method || '') ? ' by rail' : /truck/i.test(o.ship_method || '') ? ' by truck' : ''}
+                  {/^RL|rail/i.test(o.ship_method || '') ? ' by rail' : /^TL|truck/i.test(o.ship_method || '') ? ' by truck' : ''}
                   {' '}· PO {o.order_id} · due {fmtDate(o.due_date)}
                 </span>
               </button>
@@ -519,7 +524,19 @@ function ReceiveJob({ orderId }: { orderId?: number }) {
             {n > 0 && !suggested && tiles.length > 0 && (
               <div className="small muted" style={{ marginTop: 8 }}>
                 No storage tank has room for all {fmtLbs(n)} lbs. Receive part of it into one tank now
-                and the rest into another — or, for soap, put it straight into a reactor from the batch on the acid screen.
+                and the rest into another — or leave it on the {conveyance === 'Railcar' ? 'car' : 'truck'} and unload it later.
+              </div>
+            )}
+            {onVehicle && (
+              // A railcar is often received for the invoice while it still
+              // sits on the spur, and unloaded when a tank is ready: the
+              // legacy PIMS received it onto location 0 for exactly this.
+              <div className="row" style={{ gap: 8, marginTop: 10 }}>
+                <button className={tank === onVehicle.location_id ? 'primary' : ''} aria-pressed={tank === onVehicle.location_id}
+                  onClick={() => setTank(onVehicle.location_id)}>
+                  Leave it on the {conveyance === 'Railcar' ? 'railcar' : 'truck'} — unload later
+                </button>
+                <span className="small muted">It waits on {onVehicle.number}, and shows on Today until it is unloaded.</span>
               </div>
             )}
           </Step>
@@ -538,7 +555,9 @@ function ReceiveJob({ orderId }: { orderId?: number }) {
                 scale_reading_id: reading && n === (reading.net_lbs ?? reading.gross_lbs) ? reading.reading_id : null,
               })}>
               {busy ? <span className="spinner" /> : null}
-              Receive {fmtLbs(n)} lbs of {materialLabel(reference, materialId)} off the {conveyance.toLowerCase()} into {tankNumber(tiles, tank)}
+              {onVehicle && tank === onVehicle.location_id
+                ? <>Receive {fmtLbs(n)} lbs of {materialLabel(reference, materialId)} — still on the {conveyance.toLowerCase()} ({onVehicle.number})</>
+                : <>Receive {fmtLbs(n)} lbs of {materialLabel(reference, materialId)} off the {conveyance.toLowerCase()} into {tankNumber(tiles, tank)}</>}
             </button>
           </div>
         </>

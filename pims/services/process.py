@@ -231,7 +231,8 @@ def get(batch_id: str, conn=None) -> dict[str, Any]:
             **output,
             "lbs": round_lbs(sum(float(r["to_qty"] or 0) for r in mine)),
             "into": sorted({r["to_location_number"] for r in mine if r["to_location_number"]}),
-            "readings": mine[0]["readings"] if mine else {},
+            # What was measured; "readings" stays the recipe's list of what to take.
+            "measured": mine[0]["readings"] if mine else {},
             "suggested_tanks": _suggested_tanks(batch["plant_id"], output["material_id"], batch["vessel_id"], conn),
         })
 

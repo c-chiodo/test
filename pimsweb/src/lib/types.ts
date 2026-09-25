@@ -286,6 +286,36 @@ export interface Department {
   methods?: string[]
 }
 
+export interface ProcessOutput {
+  output_id: number
+  material_id: number
+  material_number: string
+  material_description: string
+  role: string
+  label: string
+  /** Comma list of readings this layer carries: "moisture,spintest". */
+  readings: string
+  /** What was measured on this layer at the break. */
+  measured: Record<string, number>
+  lbs: number
+  into: string[]
+  suggested_tanks: number[]
+}
+
+export interface ProcessGuide {
+  key: string
+  label: string
+  percentage: number
+  materials: { material_id: number; number: string; description: string }[]
+  material_id: number
+  material_number: string
+  material_description: string
+  guide_lbs: number
+  charged_lbs: number
+  still_to_add: number
+  basis: string
+}
+
 export interface ProcessBatch {
   batch_id: string
   order_id: number | null
@@ -303,15 +333,19 @@ export interface ProcessBatch {
   drawn_lbs: number | null
   vessel: { location_id: number; number: string; description: string; max_capacity: number | null } | null
   product: { material_id: number; number: string; description: string } | null
-  recipe: { recipe_id: number; name: string; notes: string; yield_pct: number; vessel_type: string } | null
+  process_material: { material_id: number; number: string; description: string } | null
+  recipe: { recipe_id: number; name: string; notes: string; yield_pct: number; vessel_type: string; expected_tfa: number | null } | null
   expected_yield: number
   contents: { material_id: number; number: string; description: string; lbs: number }[]
   total_in: number
-  expected_out: number
-  guide: {
-    material_id: number; material_number: string; material_description: string; percentage: number
-    guide_lbs: number; charged_lbs: number; still_to_add: number; basis: string
-  }[]
+  expected_out: number | null
+  guide: ProcessGuide[]
+  outputs: ProcessOutput[]
+  metrics: {
+    lead_in: number; total_in: number; measured_out: number; tfa?: number
+    theoretical_oil?: number; expected_oil?: number; fpy?: number
+    split?: Record<string, number>; unaccounted?: number; [key: string]: any
+  }
   transactions: Record<string, any>[]
   timeline: { stage: string; label: string; at: string | null }[]
 }

@@ -16,6 +16,8 @@ export interface Store {
   department: Row[]
   plant_department: Row[]
   process_batch: Row[]
+  blend_recipe_output: Row[]
+  txn_reading: Row[]
   exported_at?: Row[]
   order_type: Row[]
   status: Row[]

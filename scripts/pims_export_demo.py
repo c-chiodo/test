@@ -38,6 +38,8 @@ TABLES = [
     "blend_recipe",
     "blend_recipe_component",
     "process_batch",
+    "blend_recipe_output",
+    "txn_reading",
     "location_type",
     "location",
     "location_default",

@@ -61,6 +61,8 @@ export default function Today() {
   // Batches under way in a reactor — they span shifts, so whoever is on now
   // sees them first.
   const running = useAsync(() => api.get<ProcessBatch[]>(`/api/process/batches?plant_id=${plantId}`), [plantId])
+  // Received but not unloaded: the railcar on the spur costs demurrage.
+  const spur = useAsync(() => api.get<any[]>(`/api/process/spur?plant_id=${plantId}`), [plantId])
   const tanks = useAsync(
     () => api.get<TankBoardData>(`/api/display/tanks${qs({ plant_id: plantId, department_id: deptId ?? undefined })}`),
     [plantId, deptId],
@@ -68,7 +70,7 @@ export default function Today() {
 
   // The shift's lists go stale as other people work; refresh them quietly.
   useEffect(() => {
-    const timer = window.setInterval(() => { staged.reload(); tanks.reload(); running.reload() }, 60_000)
+    const timer = window.setInterval(() => { staged.reload(); tanks.reload(); running.reload(); spur.reload() }, 60_000)
     return () => window.clearInterval(timer)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plantId, deptId])
@@ -88,6 +90,9 @@ export default function Today() {
   // product's recipe, so nothing here names a department.
   const ownScreens = batchDepartments(departments)
   const recipeFor = new Map((recipes.data ?? []).map((r) => [r.material_id, r]))
+  // A product can have a recipe per tank type (oil off a settle, or off an
+  // MGR reprocess); the work order may say which.
+  const recipeOfOrder = (o: Order) => (recipes.data ?? []).find((r) => r.recipe_id === o.recipe_id) ?? recipeFor.get(o.material_one_id)
   const workWaiting = waiting(work.data?.rows).filter((r) => recipeFor.has(r.material_one_id))
   const batchLanes = [
     { dept: null as Department | null, title: 'Batches to blend' },
@@ -99,7 +104,7 @@ export default function Today() {
     const rows: any[] = [
       ...underway,
       ...workWaiting.filter((r) => {
-        const recipe = recipeFor.get(r.material_one_id)
+        const recipe = recipeOfOrder(r)
         const mine = dept ? recipe.department_id === dept.department_id : (recipe.vessel_type ?? 'Blend') === 'Blend'
         return mine && !busyOrders.has(r.order_id)
       }),
@@ -157,7 +162,7 @@ export default function Today() {
       ) : (
         <>
           <div className="job-main">
-            <strong>{row.material_one_number} · {row.material_one_description}</strong>
+            <strong>{lane.staged ? `${recipeOfOrder(row)?.name ?? ''} · ` : ''}{row.material_one_number} · {row.material_one_description}</strong>
             <span>Work order {row.order_id}{row.blend_serial_number ? ` · serial ${row.blend_serial_number}` : ''}</span>
           </div>
           <JobSide qty={left(row)} due={row.due_date} />
@@ -170,6 +175,28 @@ export default function Today() {
         </>
       ),
     })),
+    {
+      key: 'spur', title: 'Waiting on the spur',
+      // The acid and receiving departments' work; nobody else's lane.
+      rows: (!deptId || ownScreens.some((d) => d.department_id === deptId) || /receiv/i.test(department?.description ?? ''))
+        ? (spur.data ?? []).map((r) => ({ ...r, order_id: r.location_id * 100000 + r.material_id })) : [],
+      late: 0, loading: spur.loading, error: spur.error, empty: 'Nothing waiting to unload.', always: false,
+      render: (row: any) => (
+        <>
+          <div className="job-main">
+            <strong>{row.material_number} · {row.material_description}</strong>
+            <span>{row.location_number} · {row.cars.map((c: any) => c.trailer_number || '—').join(', ')}</span>
+          </div>
+          <div className="job-side">
+            <span className="job-qty">{fmtLbs(row.balance)} lbs</span>
+            <span className={row.oldest_minutes > 24 * 60 ? 'job-late' : 'job-due'}>received {clock(row.oldest_minutes)} ago</span>
+          </div>
+          {ownScreens[0]
+            ? <button className={`${canAct ? 'primary ' : ''}job-go`} onClick={() => navigate(`batches/${ownScreens[0].department_id}`)}>Unload</button>
+            : <span />}
+        </>
+      ),
+    },
     {
       key: 'ship', title: 'Trailers to ship', rows: toShip, late: 0,
       loading: staged.loading, error: staged.error, empty: 'No loaded trailers waiting.', always: true,

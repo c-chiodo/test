@@ -459,7 +459,10 @@ function postTransaction(operation: string, payload: Row): Row {
     }
   }
 
-  if (spec.from && fromLocationId && fromMaterialId) {
+  // Steam and city water come from a utility: no stock to overdraw.
+  const fromUtility = fromLocationId
+    && store.location_type.find((t) => t.location_type_id === locations.get(fromLocationId)?.location_type_id)?.name === 'Utility'
+  if (spec.from && fromLocationId && fromMaterialId && !fromUtility) {
     const available = balanceOf(fromLocationId, fromMaterialId)
     if (fromQty - available > 0.01) {
       const location = locations.get(fromLocationId)!
@@ -1339,7 +1342,7 @@ function companionPermissions(permissions: string[]): string[] {
 
 /* ----------------------------------------------------------- tank board */
 
-const TANK_TYPES = new Set(['Tank', 'Blend', 'Acid'])
+const TANK_TYPES = new Set(['Tank', 'Blend', 'Acid', 'Settle', 'MGR'])
 
 function tankState(total: number, capacity: number | null): string {
   if (total < -0.5) return 'negative'
@@ -1476,10 +1479,27 @@ function recipeComponents(recipeId: number): Row[] {
     }))
 }
 
-function recipeForMaterial(materialId: number): Row | null {
-  const recipe = store.blend_recipe.find((r) => r.material_id === materialId && r.active)
+function recipeOutputs(recipeId: number): Row[] {
+  const materials = byId.material()
+  return (store.blend_recipe_output ?? [])
+    .filter((o) => o.recipe_id === recipeId)
+    .sort((a, b) => a.sort_order - b.sort_order || a.output_id - b.output_id)
+    .map((o) => ({
+      ...o,
+      material_number: materials.get(o.material_id)?.number ?? null,
+      material_description: materials.get(o.material_id)?.description ?? null,
+    }))
+}
+
+/** blend.recipe_for_material: one per product per vessel; blend first. */
+function recipeForMaterial(materialId: number, method: string | null = null, recipeId: number | null = null): Row | null {
+  const recipe = recipeId
+    ? store.blend_recipe.find((r) => r.recipe_id === recipeId)
+    : store.blend_recipe
+      .filter((r) => r.material_id === materialId && r.active && (!method || (r.method || 'blend') === method))
+      .sort((a, b) => Number((b.method || 'blend') === 'blend') - Number((a.method || 'blend') === 'blend') || a.recipe_id - b.recipe_id)[0]
   if (!recipe) return null
-  return { ...recipe, components: recipeComponents(recipe.recipe_id) }
+  return { ...recipe, components: recipeComponents(recipe.recipe_id), outputs: recipeOutputs(recipe.recipe_id) }
 }
 
 function chargeFor(quantity: number, yieldPct: number): number {
@@ -1746,18 +1766,21 @@ function blendBatch(batchId: string): Row {
 
 /* -------------------------------------------------------- staged batches */
 
-/* pims/services/process.py, from the sandbox's store: soap charged, acid
- * added, mixed, settled, drawn off and measured. */
+/* pims/services/process.py, from the sandbox's store: soap into a settle
+ * tank as 1006 Soap in Process, acid and steam on top, cook, mix, settle,
+ * break into oil, MGR and water, each measured with its readings. */
 const STAGES = ['charging', 'acid', 'mixing', 'settling', 'drawn']
 const OPEN_STAGES = ['charging', 'acid', 'mixing', 'settling']
 const STAGE_LABEL: Record<string, string> = {
-  charging: 'Charging soap', acid: 'Adding acid', mixing: 'Mixing', settling: 'Settling',
-  drawn: 'Drawn off', cancelled: 'Cancelled',
+  charging: 'Soap going in', acid: 'Acid going in', mixing: 'Cooking & mixing', settling: 'Settling',
+  drawn: 'Broken', cancelled: 'Cancelled',
 }
 const STAGE_TIME: Record<string, string> = {
   charging: 'started_at', acid: 'acid_at', mixing: 'mixing_at', settling: 'settling_at', drawn: 'drawn_at',
 }
 const YIELD_TOLERANCE = 8
+const BALANCE_TOLERANCE = 0.10
+const round2 = (n: number) => Math.round(n * 100) / 100
 
 function processRow(batchId: string): Row {
   const row = (store.process_batch ?? []).find((b) => b.batch_id === batchId)
@@ -1765,42 +1788,134 @@ function processRow(batchId: string): Row {
   return row
 }
 
+function batchRecipe(batch: Row): Row | null {
+  return batch.recipe_id ? recipeForMaterial(batch.material_id, null, batch.recipe_id) : null
+}
+
+function batchCharges(batch: Row): Row[] {
+  return store.inventory_transaction.filter((t) => t.batch_id === batch.batch_id
+    && t.to_location_id === batch.vessel_id && !t.voided && !t.is_reversal)
+}
+
+/** Pounds of each ingredient in — from the ingredient side when the tank
+ *  holds a process material (1006). */
 function processContents(batch: Row): Map<number, number> {
+  const recipe = batchRecipe(batch)
+  const byIngredient = Boolean(recipe?.process_material_id)
   const held = new Map<number, number>()
-  for (const t of store.inventory_transaction) {
-    if (t.batch_id !== batch.batch_id || t.to_location_id !== batch.vessel_id || t.voided || t.is_reversal) continue
-    held.set(t.to_material_id, (held.get(t.to_material_id) ?? 0) + Number(t.to_qty || 0))
+  for (const t of batchCharges(batch)) {
+    const m = byIngredient && t.from_material_id ? t.from_material_id : t.to_material_id
+    held.set(m, (held.get(m) ?? 0) + Number(t.to_qty || 0))
   }
   for (const [k, v] of held) if (v <= 0.005) held.delete(k)
   return held
 }
 
+function inVessel(batch: Row): Map<number, number> {
+  const held = new Map<number, number>()
+  for (const t of batchCharges(batch)) held.set(t.to_material_id, (held.get(t.to_material_id) ?? 0) + Number(t.to_qty || 0))
+  return held
+}
+
+function recipeGroups(recipe: Row | null): Row[] {
+  const groups: Row[] = []
+  for (const c of (recipe?.components ?? []) as Row[]) {
+    const key = c.grp || `m${c.material_id}`
+    let group = groups.find((g) => g.key === key)
+    if (!group) {
+      group = {
+        key,
+        label: c.grp ? String(c.grp).replace(/^./, (x: string) => x.toUpperCase()) : c.material_description,
+        percentage: c.percentage,
+        materials: [],
+      }
+      groups.push(group)
+    }
+    group.materials.push({ material_id: c.material_id, number: c.material_number, description: c.material_description })
+  }
+  return groups
+}
+
+function suggestedTanks(plantId: number, materialId: number, exclude: number): number[] {
+  const types = new Map(store.location_type.map((t) => [t.location_type_id, t.name]))
+  return balances({ plant_id: plantId, location_id: null, material_id: materialId, as_of: null, include_zero: false })
+    .filter((r: Row) => r.location_id !== exclude && r.balance > 0.5
+      && types.get(byId.location().get(r.location_id)?.location_type_id) === 'Tank')
+    .sort((a: Row, b: Row) => ((b.max_capacity || 0) - locationTotal(b.location_id)) - ((a.max_capacity || 0) - locationTotal(a.location_id)))
+    .slice(0, 3).map((r: Row) => r.location_id)
+}
+
 function processGet(batchId: string): Row {
   const batch = processRow(batchId)
-  const recipe = store.blend_recipe.find((r) => r.recipe_id === batch.recipe_id)
-  const components = recipe ? recipeComponents(recipe.recipe_id) : []
+  const recipe = batchRecipe(batch)
   const held = processContents(batch)
   const materials = byId.material()
   const vessel = byId.location().get(batch.vessel_id)
-  const totalIn = Math.round([...held.values()].reduce((a, b) => a + b, 0) * 100) / 100
+  const readings = new Map<number, Row>()
+  for (const r of store.txn_reading ?? []) {
+    if (!readings.has(r.transaction_id)) readings.set(r.transaction_id, {})
+    readings.get(r.transaction_id)![r.analyte] = r.value
+  }
+  const rows = store.inventory_transaction.filter((t) => t.batch_id === batch.batch_id)
+    .sort((a, b) => a.transaction_id - b.transaction_id)
+    .map((t): Row => ({ ...hydrateTransaction(t), readings: readings.get(t.transaction_id) ?? {} }))
+  const totalIn = round2([...held.values()].reduce((a, b) => a + b, 0))
+  const tfa = Number(recipe?.expected_tfa || 0) || null
   const expectedYield = Number(recipe?.yield_pct || 100)
+  const groups = recipeGroups(recipe)
   const guide: Row[] = []
-  if (components.length) {
-    const lead = components[0]
-    const leadIn = held.get(lead.material_id) ?? 0
-    const charge = leadIn > 0 ? leadIn * 100 / lead.percentage : chargeFor(batch.target_lbs, expectedYield)
-    const basis = leadIn > 0
-      ? `for the ${Math.round(leadIn).toLocaleString()} lbs of ${lead.material_number} charged`
-      : `for ${Math.round(batch.target_lbs).toLocaleString()} lbs out at ${expectedYield}% yield`
-    for (const c of components) {
-      const wanted = Math.round(charge * c.percentage) / 100
-      const have = held.get(c.material_id) ?? 0
+  if (groups.length) {
+    const lead = groups[0]
+    const leadIn = lead.materials.reduce((a: number, m: Row) => a + (held.get(m.material_id) ?? 0), 0)
+    let basisLbs: number
+    let basis: string
+    if (leadIn > 0) {
+      basisLbs = leadIn
+      basis = `for the ${Math.round(leadIn).toLocaleString()} lbs of ${String(lead.label).toLowerCase()} in`
+    } else {
+      const target = Number(batch.target_lbs || 0)
+      basisLbs = !target ? 0 : tfa && recipe?.outputs?.length
+        ? target / (tfa / 100) / (expectedYield / 100)
+        : chargeFor(target, expectedYield) * lead.percentage / 100
+      basisLbs = round2(basisLbs)
+      basis = `for ${Math.round(target).toLocaleString()} lbs out`
+    }
+    for (const g of groups) {
+      const wanted = round2(basisLbs * g.percentage / 100)
+      const have = round2(g.materials.reduce((a: number, m: Row) => a + (held.get(m.material_id) ?? 0), 0))
       guide.push({
-        material_id: c.material_id, material_number: c.material_number, material_description: c.material_description,
-        percentage: c.percentage, guide_lbs: wanted, charged_lbs: Math.round(have * 100) / 100,
-        still_to_add: Math.round(Math.max(wanted - have, 0) * 100) / 100, basis,
+        ...g, material_id: g.materials[0].material_id, material_number: g.materials[0].number,
+        material_description: g.label, guide_lbs: wanted, charged_lbs: have,
+        still_to_add: round2(Math.max(wanted - have, 0)), basis,
       })
     }
+  }
+  const outRows = rows.filter((r) => r.from_location_id === batch.vessel_id && !r.voided && !r.is_reversal)
+  const outputs = ((recipe?.outputs ?? []) as Row[]).map((o): Row => {
+    const mine = outRows.filter((r) => r.to_material_id === o.material_id)
+    return {
+      ...o,
+      lbs: round2(mine.reduce((a, r) => a + Number(r.to_qty || 0), 0)),
+      into: [...new Set(mine.map((r) => r.to_location_number).filter(Boolean))].sort(),
+      measured: mine[0]?.readings ?? {},
+      suggested_tanks: suggestedTanks(batch.plant_id, o.material_id, batch.vessel_id),
+    }
+  })
+  const leadIn = guide[0]?.charged_lbs ?? 0
+  const measured = outputs.length ? round2(outputs.reduce((a, o) => a + o.lbs, 0))
+    : round2(outRows.reduce((a, r) => a + Number(r.to_qty || 0), 0))
+  const metrics: Row = { lead_in: leadIn, total_in: totalIn, measured_out: measured }
+  for (const g of guide.slice(1)) if (leadIn) metrics[`${g.key}_per_100`] = Math.round(g.charged_lbs / leadIn * 10000) / 100
+  if (tfa && leadIn) {
+    metrics.tfa = tfa
+    metrics.theoretical_oil = round2(leadIn * tfa / 100)
+    metrics.expected_oil = round2(leadIn * tfa / 100 * expectedYield / 100)
+    const oil = outputs.find((o) => o.role === 'oil')
+    if (oil && batch.status === 'drawn') metrics.fpy = Math.round(oil.lbs / (leadIn * tfa / 100) * 1000) / 10
+  }
+  if (measured && outputs.length && batch.status === 'drawn') {
+    metrics.split = Object.fromEntries(outputs.map((o) => [o.role, Math.round(o.lbs / measured * 1000) / 10]))
+    metrics.unaccounted = round2(totalIn - measured)
   }
   const since = batch[STAGE_TIME[batch.status] ?? 'started_at'] ?? batch.started_at
   return {
@@ -1811,17 +1926,21 @@ function processGet(batchId: string): Row {
     stage_since: since,
     vessel: vessel ? { location_id: vessel.location_id, number: vessel.number, description: vessel.description, max_capacity: vessel.max_capacity } : null,
     product: materials.get(batch.material_id) ?? null,
-    recipe: recipe ? { recipe_id: recipe.recipe_id, name: recipe.name, notes: recipe.notes, yield_pct: expectedYield, vessel_type: recipe.vessel_type } : null,
+    process_material: recipe?.process_material_id ? materials.get(recipe.process_material_id) ?? null : null,
+    recipe: recipe ? {
+      recipe_id: recipe.recipe_id, name: recipe.name, notes: recipe.notes, yield_pct: expectedYield,
+      vessel_type: recipe.vessel_type, expected_tfa: recipe.expected_tfa ?? null,
+    } : null,
     expected_yield: expectedYield,
     contents: [...held.entries()].map(([m, lbs]) => ({
-      material_id: m, number: materials.get(m)?.number, description: materials.get(m)?.description,
-      lbs: Math.round(lbs * 100) / 100,
+      material_id: m, number: materials.get(m)?.number, description: materials.get(m)?.description, lbs: round2(lbs),
     })),
     total_in: totalIn,
-    expected_out: Math.round(totalIn * expectedYield) / 100,
+    expected_out: outputs.length ? metrics.expected_oil ?? null : round2(totalIn * expectedYield / 100),
     guide,
-    transactions: store.inventory_transaction.filter((t) => t.batch_id === batch.batch_id)
-      .sort((a, b) => a.transaction_id - b.transaction_id).map(hydrateTransaction),
+    outputs,
+    metrics,
+    transactions: rows,
     timeline: STAGES.map((stage) => ({ stage, label: STAGE_LABEL[stage], at: batch[STAGE_TIME[stage]] ?? null })),
   }
 }
@@ -1838,15 +1957,36 @@ function processVessels(plantId: number, departmentId: number | null = null): Ro
   const types = new Set(store.blend_recipe
     .filter((r) => r.active && r.method === 'staged' && (!departmentId || r.department_id === departmentId))
     .map((r) => r.vessel_type))
-  const typeIds = new Set(store.location_type.filter((t) => types.has(t.name)).map((t) => t.location_type_id))
+  const typeName = new Map(store.location_type.map((t) => [t.location_type_id, t.name]))
   const busy = new Map(openProcessBatches(plantId).map((b) => [b.vessel_id, b]))
   return store.location
-    .filter((l) => l.plant_id === plantId && l.active && typeIds.has(l.location_type_id))
-    .sort((a, b) => String(a.number).localeCompare(String(b.number)))
+    .filter((l) => l.plant_id === plantId && l.active && types.has(typeName.get(l.location_type_id)))
+    .sort((a, b) => String(typeName.get(b.location_type_id)).localeCompare(String(typeName.get(a.location_type_id)))
+      || String(a.number).localeCompare(String(b.number), undefined, { numeric: true }))
     .map((l) => ({
       location_id: l.location_id, number: l.number, description: l.description, max_capacity: l.max_capacity,
-      total: Math.round(locationTotal(l.location_id) * 100) / 100, batch: busy.get(l.location_id) ?? null,
+      vessel_type: typeName.get(l.location_type_id),
+      total: round2(locationTotal(l.location_id)), batch: busy.get(l.location_id) ?? null,
     }))
+}
+
+function processSpur(plantId: number): Row[] {
+  const types = new Map(store.location_type.map((t) => [t.location_type_id, t.name]))
+  const receiveType = store.transaction_type.find((t) => (t.kind || t.code) === 'RECEIVE')?.transaction_type_id
+  return balances({ plant_id: plantId, location_id: null, material_id: null, as_of: null, include_zero: false })
+    .filter((r: Row) => types.get(byId.location().get(r.location_id)?.location_type_id) === 'Receiving' && r.balance > 0.5)
+    .map((r: Row) => {
+      const cars = store.inventory_transaction
+        .filter((t) => t.to_location_id === r.location_id && t.to_material_id === r.material_id
+          && t.transaction_type_id === receiveType && !t.voided && !t.is_reversal)
+        .sort((a, b) => b.transaction_id - a.transaction_id).slice(0, 5)
+        .map((t) => ({ trailer_number: t.trailer_number, transaction_date: t.transaction_date, to_qty: t.to_qty, order_id: t.order_id }))
+      const oldest = cars[cars.length - 1]
+      return {
+        ...r, location_type: 'Receiving', cars,
+        oldest_minutes: oldest ? Math.round((Date.now() - new Date(oldest.transaction_date).getTime()) / 6000) / 10 : null,
+      }
+    })
 }
 
 function processStart(payload: Row): Row {
@@ -1856,27 +1996,28 @@ function processStart(payload: Row): Row {
   const order = byId.order().get(Number(payload.order_id))
   if (!order) return notFound(`Order ${payload.order_id} was not found.`)
   requirePlant(user, order.plant_id)
-  const recipe = recipeForMaterial(order.material_one_id)
+  const recipe = recipeForMaterial(order.material_one_id, 'staged', order.recipe_id ?? null)
   if (!recipe || recipe.method !== 'staged') {
     refuse(`Order ${order.order_id} is not made in stages — run it on the Blend screen.`, { rule: 'not_staged' })
   }
   const existing = (store.process_batch ?? []).find((b) => b.order_id === order.order_id && OPEN_STAGES.includes(b.status))
   if (existing) return processGet(existing.batch_id)
-  const all = processVessels(order.plant_id, recipe!.department_id)
+  const all = processVessels(order.plant_id, recipe!.department_id).filter((v) => v.vessel_type === recipe!.vessel_type)
   const free = all.filter((v) => !v.batch)
   let vesselId = payload.vessel_id ? Number(payload.vessel_id) : null
   if (vesselId) {
     const chosen = all.find((v) => v.location_id === vesselId)
-    if (!chosen) invalid("That is not one of this department's vessels.", { vessel_id: 'Choose a reactor.' })
+    if (!chosen) invalid("That is not one of this recipe's tanks.", { vessel_id: 'Choose a tank.' })
     if (chosen!.batch) {
       refuse(`${chosen!.number} already has batch ${chosen!.batch.batch_id} in it `
-        + `(${chosen!.batch.stage_label.toLowerCase()}). Draw that off first, or use another reactor.`,
+        + `(${chosen!.batch.stage_label.toLowerCase()}). Break that first, or use another tank.`,
       { rule: 'vessel_busy', batch_id: chosen!.batch.batch_id })
     }
   } else if (free.length) {
     vesselId = free[0].location_id
   } else {
-    refuse('Every reactor at this plant has a batch in it. Draw one off first.', { rule: 'no_free_vessel' })
+    refuse(`Every ${String(recipe!.vessel_type).toLowerCase()} tank at this plant has a batch in it. Break one first.`,
+      { rule: 'no_free_vessel' })
   }
   const target = payload.target_lbs
     ? Number(payload.target_lbs)
@@ -1891,13 +2032,26 @@ function processStart(payload: Row): Row {
   store.process_batch.push({
     batch_id: batchId, order_id: order.order_id, plant_id: order.plant_id,
     department_id: recipe!.department_id ?? order.department_id, recipe_id: recipe!.recipe_id,
-    vessel_id: vesselId, material_id: order.material_one_id, target_lbs: Math.round(target * 100) / 100,
+    vessel_id: vesselId, material_id: order.material_one_id, target_lbs: round2(target),
     status: 'charging', started_at: nowIso(), started_by: user.username,
     acid_at: null, mixing_at: null, settling_at: null, drawn_at: null, drawn_by: null, drawn_lbs: null, notes: '',
   })
   audit('process.start', 'process_batch', batchId, `Started batch ${batchId} for ${Math.round(target).toLocaleString()} lbs`,
     { vessel_id: vesselId }, order.order_id)
   return processGet(batchId)
+}
+
+function receivingLocation(plantId: number, conveyance: string): number {
+  const receiving = store.location_type.find((t) => t.name === 'Receiving')?.location_type_id
+  const rows = store.location.filter((l) => l.plant_id === plantId && l.active && l.location_type_id === receiving)
+    .sort((a, b) => String(a.number).localeCompare(String(b.number)))
+  if (!rows.length) refuse('This plant has no receiving location to take a delivery onto.', { rule: 'no_receiving_location' })
+  const word = /^rail/i.test(conveyance) ? 'RAIL' : 'TRUCK'
+  return (rows.find((l) => String(l.number).toUpperCase().includes(word)) ?? rows[0]).location_id
+}
+
+function tagBatch(txn: Row, batchId: string) {
+  store.inventory_transaction.find((t) => t.transaction_id === txn.transaction_id)!.batch_id = batchId
 }
 
 function processCharge(batchId: string, payload: Row): Row {
@@ -1909,34 +2063,40 @@ function processCharge(batchId: string, payload: Row): Row {
     refuse(`Batch ${batchId} is ${STAGE_LABEL[batch.status].toLowerCase()} — nothing more goes in now.`,
       { rule: 'batch_closed_to_charges' })
   }
-  const allowed = new Set(recipeComponents(batch.recipe_id).map((c) => c.material_id))
+  const recipe = batchRecipe(batch)
+  const allowed = new Set(((recipe?.components ?? []) as Row[]).map((c) => c.material_id))
   const materialId = Number(payload.material_id || 0)
-  const quantity = Math.round(Number(payload.quantity || 0) * 100) / 100
+  const quantity = round2(Number(payload.quantity || 0))
   if (allowed.size && !allowed.has(materialId)) {
     invalid("That material is not in this batch's recipe.", { material_id: "Charge one of the recipe's ingredients." })
   }
   if (quantity <= 0) invalid('Enter the pounds that went in.', { quantity: 'Greater than zero.' })
+  const into = recipe?.process_material_id || materialId
+  const kind = recipe?.process_material_id ? 'PRODUCE' : 'MOVE'
   const vehicle = String(payload.vehicle ?? '').trim()
   const conveyance = String(payload.conveyance ?? '').trim()
   const base = {
-    plant_id: batch.plant_id, department_id: batch.department_id, to_location_id: batch.vessel_id,
-    to_material_id: materialId, to_qty: quantity, user_date: payload.user_date,
+    plant_id: batch.plant_id, department_id: batch.department_id, order_id: batch.order_id,
+    user_date: payload.user_date, trailer_number: vehicle,
     remarks: payload.remarks || `Charged to ${batchId}${conveyance ? ` off ${conveyance.toLowerCase()} ${vehicle}`.trimEnd() : ''}`,
-    trailer_number: vehicle, idempotency_key: payload.idempotency_key,
   }
-  let txn: Row
+  let fromLocation = payload.from_location_id ? Number(payload.from_location_id) : null
   if (payload.order_id) {
-    txn = postTransaction('RECEIVE', { ...base, order_id: Number(payload.order_id) })
-  } else {
-    if (!payload.from_location_id) {
-      invalid('Say where it came from — a tank, or a delivery.', { from_location_id: 'Choose the tank, or the truck or railcar.' })
-    }
-    txn = postTransaction('MOVE', {
-      ...base, from_location_id: Number(payload.from_location_id), from_material_id: materialId, from_qty: quantity,
+    // Received onto the truck/rail location against its PO, then unloaded.
+    fromLocation = receivingLocation(batch.plant_id, conveyance || 'Truck')
+    const receipt = postTransaction('RECEIVE', {
+      ...base, order_id: Number(payload.order_id), to_location_id: fromLocation, to_material_id: materialId, to_qty: quantity,
     })
+    tagBatch(receipt, batchId)
   }
-  const row = store.inventory_transaction.find((t) => t.transaction_id === txn.transaction_id)!
-  row.batch_id = batchId
+  if (!fromLocation) {
+    invalid('Say where it came from — a tank, the spur, or a delivery.', { from_location_id: 'Choose the tank, or the truck or railcar.' })
+  }
+  const txn = postTransaction(kind, {
+    ...base, from_location_id: fromLocation, from_material_id: materialId, from_qty: quantity,
+    to_location_id: batch.vessel_id, to_material_id: into, to_qty: quantity,
+  })
+  tagBatch(txn, batchId)
   return processGet(batchId)
 }
 
@@ -1946,7 +2106,7 @@ function processAdvance(batchId: string, to: string): Row {
   const batch = processRow(batchId)
   requirePlant(user, batch.plant_id)
   if (!['acid', 'mixing', 'settling'].includes(to)) {
-    invalid('Draw-off is its own step; the stages here are acid, mixing and settling.', {})
+    invalid('The break is its own step; the stages here are acid, mixing and settling.', {})
   }
   const current = STAGES.indexOf(batch.status)
   if (STAGES.indexOf(to) !== current + 1) {
@@ -1969,55 +2129,82 @@ function processDraw(batchId: string, payload: Row): Row {
   const batch = processRow(batchId)
   requirePlant(user, batch.plant_id)
   if (batch.status !== 'settling') {
-    refuse(`Batch ${batchId} is ${String(STAGE_LABEL[batch.status]).toLowerCase()}. It is drawn off once it has settled.`,
+    refuse(`Batch ${batchId} is ${String(STAGE_LABEL[batch.status]).toLowerCase()}. It is broken once it has settled.`,
       { rule: 'not_settled' })
   }
-  const held = [...processContents(batch).entries()]
-  const totalIn = Math.round(held.reduce((a, [, v]) => a + v, 0) * 100) / 100
-  const quantity = Math.round(Number(payload.quantity || 0) * 100) / 100
+  const recipe = batchRecipe(batch)
+  const held = [...inVessel(batch).entries()].filter(([, v]) => v > 0.005)
+  const totalIn = round2(held.reduce((a, [, v]) => a + v, 0))
+  const single = !(recipe?.outputs ?? []).length
+  let outputs: Row[] = single
+    ? [{ material_id: batch.material_id, to_location_id: payload.to_location_id, quantity: payload.quantity, readings: payload.readings ?? {} }]
+    : (payload.outputs ?? []).filter((o: Row) => Number(o.quantity || 0) > 0)
+  if (!single) {
+    const wanted = new Set((recipe!.outputs as Row[]).map((o) => o.material_id))
+    if (outputs.some((o) => !wanted.has(Number(o.material_id)))) {
+      invalid("A layer that is not one of this recipe's outputs.", { outputs: "Oil, MGR or water — the recipe's outputs." })
+    }
+  }
   const fields: Record<string, string> = {}
-  if (quantity <= 0) fields.quantity = 'Enter the pounds drawn off.'
-  if (!payload.to_location_id) fields.to_location_id = 'Choose the tank it went into.'
-  if (Object.keys(fields).length) invalid('This draw-off cannot be recorded.', fields)
-  if (quantity - totalIn > 0.5) {
-    invalid(`${Math.round(quantity).toLocaleString()} lbs drawn off is more than the `
-      + `${Math.round(totalIn).toLocaleString()} lbs that went in.`, { quantity: 'Cannot be more than was charged.' })
+  if (!outputs.length || !outputs.every((o) => Number(o.quantity || 0) > 0)) fields.quantity = 'Enter the pounds that came off.'
+  if (outputs.some((o) => !o.to_location_id)) fields.to_location_id = 'Choose the tank each layer went into.'
+  if (Object.keys(fields).length) invalid('This break cannot be recorded.', fields)
+  outputs = outputs.map((o) => ({ ...o, material_id: Number(o.material_id), to_location_id: Number(o.to_location_id), quantity: round2(Number(o.quantity)) }))
+  const measured = round2(outputs.reduce((a, o) => a + o.quantity, 0))
+  if (single) {
+    if (measured - totalIn > 0.5) {
+      invalid(`${Math.round(measured).toLocaleString()} lbs drawn off is more than the ${Math.round(totalIn).toLocaleString()} lbs that went in.`,
+        { quantity: 'Cannot be more than was charged.' })
+    }
+    const expected = Number(recipe?.yield_pct || 100)
+    const actual = totalIn ? Math.round(measured / totalIn * 1000) / 10 : 0
+    if (Math.abs(actual - expected) > YIELD_TOLERANCE && !payload.acknowledge_yield) {
+      refuse(`That is a ${actual}% yield; this recipe usually gives about ${expected}%. Check the gauge — confirm if the number is right.`,
+        { rule: 'unexpected_yield', actual, expected, acknowledge_field: 'acknowledge_yield' })
+    }
+  } else if (totalIn && Math.abs(measured - totalIn) / totalIn > BALANCE_TOLERANCE && !payload.acknowledge_balance) {
+    const gap = totalIn - measured
+    refuse(`${Math.round(totalIn).toLocaleString()} lbs went in and ${Math.round(measured).toLocaleString()} lbs are measured coming off — `
+      + `${Math.round(Math.abs(gap)).toLocaleString()} lbs ${gap > 0 ? 'unaccounted for' : 'more than went in'}. `
+      + 'Check the gauges; confirm if the numbers are right.',
+    { rule: 'unbalanced_break', total_in: totalIn, measured, acknowledge_field: 'acknowledge_balance' })
   }
-  const recipe = store.blend_recipe.find((r) => r.recipe_id === batch.recipe_id)
-  const expected = Number(recipe?.yield_pct || 100)
-  const actual = totalIn ? Math.round(quantity / totalIn * 1000) / 10 : 0
-  if (Math.abs(actual - expected) > YIELD_TOLERANCE && !payload.acknowledge_yield) {
-    refuse(`That is a ${actual}% yield; this recipe usually gives about ${expected}%. `
-      + 'Check the gauge — confirm if the number is right.',
-    { rule: 'unexpected_yield', actual, expected, acknowledge_field: 'acknowledge_yield' })
+  // Every destination must take its layer before anything is written.
+  for (const o of outputs) {
+    const dest = byId.location().get(o.to_location_id)
+    if (dest?.max_capacity && locationTotal(dest.location_id) + o.quantity - dest.max_capacity > 0.5) {
+      refuse(`${dest.number} has room for ${Math.round(dest.max_capacity - locationTotal(dest.location_id)).toLocaleString()} lbs.`,
+        { rule: 'over_capacity' })
+    }
   }
-  // Check the destination can take it before writing anything.
-  const dest = byId.location().get(Number(payload.to_location_id))
-  if (dest?.max_capacity && locationTotal(dest.location_id) + quantity - dest.max_capacity > 0.5) {
-    refuse(`${dest.number} has room for ${Math.round(dest.max_capacity - locationTotal(dest.location_id)).toLocaleString()} lbs.`,
-      { rule: 'over_capacity' })
-  }
-  const loss = Math.round((totalIn - quantity) * 100) / 100
-  const outputs = held.slice(0, -1).map(([, lbs]) => Math.round(lbs * quantity / totalIn * 100) / 100)
-  outputs.push(Math.round((quantity - outputs.reduce((a, b) => a + b, 0)) * 100) / 100)
-  const remarks = payload.remarks || `Drew off batch ${batchId}: ${Math.round(quantity).toLocaleString()} of `
-    + `${Math.round(totalIn).toLocaleString()} lbs (${actual}%); ${Math.round(loss).toLocaleString()} lbs acid water and loss`
-  held.forEach(([materialId, lbs], index) => {
+  const shares = outputs.slice(0, -1).map((o) => round2(totalIn * o.quantity / measured))
+  shares.push(round2(totalIn - shares.reduce((a, b) => a + b, 0)))
+  const remarks = payload.remarks || `Broke batch ${batchId}: ${Math.round(measured).toLocaleString()} lbs measured off ${Math.round(totalIn).toLocaleString()} lbs in`
+  const produce = (fromMaterial: number, fromQty: number, output: Row) => {
     const txn = postTransaction('PRODUCE', {
       order_id: batch.order_id, plant_id: batch.plant_id, department_id: batch.department_id,
-      from_location_id: batch.vessel_id, from_material_id: materialId, from_qty: lbs,
-      to_location_id: Number(payload.to_location_id), to_material_id: batch.material_id, to_qty: outputs[index],
+      from_location_id: batch.vessel_id, from_material_id: fromMaterial, from_qty: fromQty,
+      to_location_id: output.to_location_id, to_material_id: output.material_id, to_qty: output.quantity,
       user_date: payload.user_date, remarks,
     })
-    store.inventory_transaction.find((t) => t.transaction_id === txn.transaction_id)!.batch_id = batchId
+    tagBatch(txn, batchId)
+    store.txn_reading = store.txn_reading ?? []
+    for (const [analyte, value] of Object.entries(output.readings ?? {})) {
+      if (value === null || value === undefined || value === '') continue
+      store.txn_reading.push({ transaction_id: txn.transaction_id, analyte, value: Number(value), source: 'entered' })
+    }
+  }
+  outputs.forEach((o, i) => {
+    if (held.length === 1) produce(held[0][0], shares[i], o)
+    else for (const [m, lbs] of held) produce(m, round2(shares[i] * lbs / totalIn), { ...o, quantity: round2(o.quantity * lbs / totalIn) })
   })
   batch.status = 'drawn'
   batch.drawn_at = nowIso()
   batch.drawn_by = user.username
-  batch.drawn_lbs = quantity
+  batch.drawn_lbs = measured
   audit('process.draw', 'process_batch', batchId,
-    `Drew off ${Math.round(quantity).toLocaleString()} lbs from batch ${batchId} (${actual}% yield)`,
-    { to_location_id: payload.to_location_id, charged: totalIn, loss }, batch.order_id)
+    `Broke batch ${batchId}: ${Math.round(measured).toLocaleString()} lbs measured off ${Math.round(totalIn).toLocaleString()} lbs in`,
+    { outputs, total_in: totalIn }, batch.order_id)
   return processGet(batchId)
 }
 
@@ -2029,7 +2216,7 @@ function processCancel(batchId: string, reason: string): Row {
   if (!OPEN_STAGES.includes(batch.status)) refuse(`Batch ${batchId} is already ${batch.status}.`, { rule: 'batch_closed' })
   if (processContents(batch).size) {
     refuse(`Batch ${batchId} has product in ${byId.location().get(batch.vessel_id)?.number}. `
-      + 'Undo the charges, or draw it off, before cancelling.', { rule: 'batch_not_empty' })
+      + 'Undo the charges, or break it, before cancelling.', { rule: 'batch_not_empty' })
   }
   batch.status = 'cancelled'
   batch.notes = reason
@@ -3068,6 +3255,7 @@ async function route(method: string, path: string, body: Row): Promise<any> {
       yield_pct: r.yield_pct ?? 100,
       vessel_type: r.vessel_type ?? 'Blend',
       method: r.method ?? 'blend',
+      outputs: recipeOutputs(r.recipe_id),
       department_code: byId.department().get(r.department_id)?.code ?? null,
       department: byId.department().get(r.department_id)?.description ?? null,
       material_number: byId.material().get(r.material_id)?.number ?? null,
@@ -3253,6 +3441,11 @@ async function route(method: string, path: string, body: Row): Promise<any> {
     const user = requireUser()
     requirePlant(user, Number(params.plant_id))
     return openProcessBatches(Number(params.plant_id), params.department_id ? Number(params.department_id) : null)
+  }
+  if (method === 'GET' && match(path, '/api/process/spur')) {
+    const user = requireUser()
+    requirePlant(user, Number(params.plant_id))
+    return processSpur(Number(params.plant_id))
   }
   if (method === 'POST' && match(path, '/api/process/start')) return processStart(body)
   if ((m = match(path, '/api/process/:id/charge')) && method === 'POST') return processCharge(m[0], body)
