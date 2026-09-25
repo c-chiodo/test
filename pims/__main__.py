@@ -17,6 +17,14 @@ Scheduled work (see docs/PIMS_RUNBOOK.md §13 for the crontab):
     python -m pims gp-sync          pull Great Plains master data
     python -m pims alerts           evaluate the rules (dry run unless --send)
 
+Read-only companion to the legacy PIMS (docs/PIMS_COMPANION.md). None of these
+can write to the legacy database:
+
+    python -m pims legacy check     compare the map with ProductionData
+    python -m pims legacy sync      mirror it (every 15 minutes; --full weekly)
+    python -m pims legacy status    when the mirror last ran
+    python -m pims legacy add-user  create a sign-in for the companion
+
 Every command takes --dry-run where it would change something, and every run is
 recorded in job_run so "did it run?" is answerable from the support console.
 """
@@ -75,6 +83,21 @@ def main(argv: list[str] | None = None) -> int:
     lims_cmd.add_argument("--dry-run", action="store_true")
     lims_cmd.add_argument("--mode", default=None, help="local | sqlserver (default: PIMS_LIMS_MODE)")
     lims_cmd.add_argument("--dsn", default=None, help="ODBC DSN for --mode sqlserver")
+
+    legacy_cmd = sub.add_parser(
+        "legacy", help="read-only companion to the legacy PIMS database (never writes to it)"
+    )
+    legacy_cmd.add_argument(
+        "action", choices=["check", "sync", "status", "add-user", "readiness-sql"],
+        help="check: compare the map with the database; sync: mirror it; "
+             "status: last sync; add-user: create a companion sign-in; "
+             "readiness-sql: print a read-only T-SQL check to run in SSMS / VS Code",
+    )
+    legacy_cmd.add_argument("--counts", action="store_true", help="check: include row counts")
+    legacy_cmd.add_argument("--full", action="store_true", help="sync: re-read everything (off-hours)")
+    legacy_cmd.add_argument("--username", default=None)
+    legacy_cmd.add_argument("--name", default="")
+    legacy_cmd.add_argument("--role", default="admin")
 
     gp_cmd = sub.add_parser("gp-sync", help="pull Great Plains master data")
     gp_cmd.add_argument("--file", default=None, help="JSON export to read instead of the stub")
@@ -166,6 +189,45 @@ def main(argv: list[str] | None = None) -> int:
         result = lims_ingest.sync(source, since_days=args.since_days, dry_run=args.dry_run)
         _print(result)
         return 0 if result.get("freshness", {}).get("status") != "failed" else 1
+
+    if args.command == "legacy":
+        import getpass
+        import os
+
+        from .legacy import service as legacy_service
+
+        if args.action == "readiness-sql":
+            from .legacy import probe as legacy_probe
+
+            print(legacy_probe.readiness_sql(legacy_service.legacy_map(settings)))
+            return 0
+        db.init_db(settings)
+        if args.action == "check":
+            result = legacy_service.check(counts=args.counts)
+            print(result["report"])
+            print()
+            login = result["login"]
+            if login.get("checked"):
+                print(f"Login {login['login']} on {login['database']}: can read, cannot write. "
+                      "The companion will run with it.")
+            else:
+                print("Local stand-in, opened read-only at the storage layer; no login to check.")
+            return 0 if result["ok"] else 1
+        if args.action == "sync":
+            report = legacy_service.sync(full=args.full)
+            _print({k: v for k, v in report.items() if k != "tables"})
+            for key, table in report["tables"].items():
+                print(f"  {key:20} {table}")
+            return 0
+        if args.action == "status":
+            _print(legacy_service.status())
+            return 0
+        if not args.username:
+            print("add-user needs --username", file=sys.stderr)
+            return 2
+        password = os.environ.get("PIMS_NEW_USER_PASSWORD") or getpass.getpass("Password: ")
+        _print(legacy_service.create_local_account(args.username, args.name, password, args.role))
+        return 0
 
     if args.command == "gp-sync":
         from .integrations import gp_sync

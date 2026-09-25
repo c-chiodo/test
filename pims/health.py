@@ -12,13 +12,15 @@ single endpoint tells an on-call engineer whether the system is healthy.
 
 from __future__ import annotations
 
+import re
+
 import sqlite3
 from typing import Any
 
 from . import __version__, db, observability
 from .config import get_settings
 from .services import lims
-from .util import today_iso, utc_now_iso
+from .util import hours_since, today_iso, utc_now_iso
 
 ORDER = {"ok": 0, "degraded": 1, "failed": 2}
 
@@ -364,6 +366,35 @@ def _balances(conn=None) -> list[dict]:
     return inventory.location_balance(include_zero=False, conn=conn)
 
 
+def check_mirror(conn=None) -> dict[str, Any]:
+    """In companion mode: how stale is the mirror of the legacy database?
+
+    A stale mirror is the companion's equivalent of FE-2026-001 — screens that
+    look right and are quietly out of date — so it is measured, not assumed.
+    """
+
+    row = db.query_one("SELECT value FROM system_setting WHERE key = 'legacy.last_sync'", (), conn)
+    if row is None:
+        return {"status": "failed", "detail": "The mirror has never completed a sync.",
+                "action": "Run `python -m pims legacy check`, then `python -m pims legacy sync`."}
+    age = hours_since(row["value"])
+    minutes = None if age is None else round(age * 60)
+    if age is None or age > 6:
+        status = "failed"
+    elif age > 0.75:
+        status = "degraded"
+    else:
+        status = "ok"
+    return {
+        "status": status,
+        "last_sync": row["value"],
+        "age_minutes": minutes,
+        "detail": f"Mirror of ProductionData last synced {minutes} minutes ago.",
+        "action": "" if status == "ok" else
+                  "Check the scheduled `python -m pims legacy sync` and the job history below.",
+    }
+
+
 def diagnostics(conn=None) -> dict[str, Any]:
     """Full support snapshot: every check, plus environment and versions."""
 
@@ -375,6 +406,8 @@ def diagnostics(conn=None) -> dict[str, Any]:
         "errors": check_errors(),
         "product_setup": check_specs(conn),
     }
+    if settings.companion:
+        checks["mirror"] = check_mirror(conn)
     return {
         "status": _worst([c["status"] for c in checks.values()]),
         "service": "pims",
@@ -391,6 +424,8 @@ def diagnostics(conn=None) -> dict[str, Any]:
             "lims_fail_hours": settings.lims_fail_hours,
             "session_hours": settings.session_hours,
             "auto_seed": settings.auto_seed,
+            "mode": settings.mode,
+            "legacy_dsn": _redact(settings.legacy_dsn),
         },
     }
 
@@ -398,6 +433,8 @@ def diagnostics(conn=None) -> dict[str, Any]:
 def _redact(url: str) -> str:
     """Never let a password reach a support screen or a pasted ticket."""
 
+    # ODBC connection strings carry the password as PWD=... ; strip it.
+    url = re.sub(r"(?i)(pwd|password)\s*=\s*[^;]*", r"\1=***", url or "")
     if "://" not in url or "@" not in url:
         return url
     scheme, rest = url.split("://", 1)

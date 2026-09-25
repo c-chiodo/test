@@ -556,3 +556,18 @@ CREATE TABLE IF NOT EXISTS job_run (
 );
 
 CREATE INDEX IF NOT EXISTS ix_job_run ON job_run (job, started_at);
+
+-- ------------------------------------------------------- legacy companion
+--
+-- When PIMS runs as a read-only companion to the legacy desktop app, the
+-- tables above are a mirror of ProductionData. This records how far each
+-- mirrored table had got at each sync, so the next sync can re-read "every
+-- row created in the last N days" as a primary-key range — the cheapest read
+-- SQL Server offers — instead of scanning an unindexed date column.
+
+CREATE TABLE IF NOT EXISTS legacy_watermark (
+    table_key   TEXT NOT NULL,
+    recorded_at TEXT NOT NULL,
+    max_id      INTEGER NOT NULL,
+    PRIMARY KEY (table_key, recorded_at)
+);

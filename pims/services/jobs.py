@@ -17,6 +17,7 @@ from contextlib import contextmanager
 from datetime import date, timedelta
 from typing import Any, Iterator
 
+from ..config import get_settings
 from .. import audit, db, security
 from ..errors import NotFound, ValidationError
 from ..util import parse_dt, today_iso, utc_now, utc_now_iso
@@ -265,12 +266,13 @@ def run_recurring(dry_run: bool = False, conn=None) -> dict:
         template.pop("count", None)
         orders = orders_service.create(template, user, conn)
         order_id = orders[0]["order_id"]
-        next_run = _advance(
-            date.fromisoformat(row["next_run"]),
-            row["cadence"],
-            row["weekday"],
-            row["day_of_month"],
-        )
+        # Advance past today, not by one step. A standing order that fell
+        # behind — the job was down over a holiday — creates one order for the
+        # period it is in, not one for every period it missed: five catch-up
+        # orders for the same customer is a mess someone has to unpick by hand.
+        next_run = date.fromisoformat(row["next_run"])
+        while next_run <= today:
+            next_run = _advance(next_run, row["cadence"], row["weekday"], row["day_of_month"])
         db.update(
             "recurring_order",
             {"recurring_id": row["recurring_id"]},
@@ -301,9 +303,16 @@ def daily(plant_id: int | None = None, send: bool = True, conn=None) -> dict[str
     """Everything that should happen once a day, in order."""
 
     summary: dict[str, Any] = {"started_at": utc_now_iso(), "plant_id": plant_id}
+    companion = get_settings().companion
     with record_run("daily", conn) as detail:
-        summary["recurring"] = run_recurring(conn=conn)
-        summary["auto_close"] = auto_close(plant_id, conn=conn)
+        # A read-only companion does not create or close orders: those tables
+        # are a mirror, and the legacy app is where orders are managed.
+        summary["recurring"] = (
+            {"created": [], "skipped": "companion"} if companion else run_recurring(conn=conn)
+        )
+        summary["auto_close"] = (
+            {"closed": [], "skipped": "companion"} if companion else auto_close(plant_id, conn=conn)
+        )
         summary["alerts"] = alerts.run(plant_id, send=send, conn=conn)
         summary["digest"] = alerts.send_digest(plant_id, conn) if send else alerts.digest(plant_id, conn)
         summary["sessions_purged"] = security.purge_expired_sessions(conn)

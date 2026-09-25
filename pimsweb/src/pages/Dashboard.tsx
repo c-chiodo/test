@@ -24,7 +24,7 @@ interface DashboardData {
 }
 
 export default function Dashboard() {
-  const { plantId, plantCode, navigate } = useApp()
+  const { plantId, plantCode, navigate, can } = useApp()
 
   const summary = useAsync(
     () => api.get<DashboardData>(`/api/dashboard?plant_id=${plantId}`), [plantId],
@@ -55,7 +55,7 @@ export default function Dashboard() {
           <div className="sub">Open work, inventory and quality at a glance.</div>
         </div>
         <div className="actions">
-          <button onClick={() => navigate('operations')}>Plant floor</button>
+          {can('txn.post') && <button onClick={() => navigate('operations')}>Plant floor</button>}
           <button className="primary" onClick={() => navigate('orders')}>Orders</button>
         </div>
       </div>
@@ -98,7 +98,9 @@ export default function Dashboard() {
         <Card
           title="Trailers waiting to ship"
           subtitle={`${shipments.data?.length ?? 0} staged load(s)`}
-          actions={<button className="sm" onClick={() => navigate('operations/ship')}>Ship trailer</button>}
+          actions={can('txn.post')
+            ? <button className="sm" onClick={() => navigate('operations/ship')}>Ship trailer</button>
+            : undefined}
           tight
         >
           {shipments.loading ? <Loading /> : (

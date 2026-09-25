@@ -1329,6 +1329,14 @@ function saveQaChecklist(orderId: number, payload: Row, stage?: string | null): 
   return qaChecklists(orderId)[0]
 }
 
+function companionPermissions(permissions: string[]): string[] {
+  const all = new Set<string>()
+  for (const granted of Object.values(ROLE_PERMISSIONS)) for (const p of granted) if (p !== '*') all.add(p)
+  all.add('spec.write')
+  const held = permissions.includes('*') ? [...all] : permissions
+  return held.filter((p) => !COMPANION_BLOCKED.has(p)).sort()
+}
+
 /* -------------------------------------------------------------- blending */
 
 function recipeComponents(recipeId: number): Row[] {
@@ -2395,9 +2403,86 @@ function queryParams(path: string): Row {
 }
 
 /** Dispatch a request the way the FastAPI app would. */
+/* Companion preview: open the sandbox with #companion to see PIMS as the
+ * read-only mirror of the legacy database would present it. The same rules as
+ * the server: writes refused with a pointer to the legacy screen, write
+ * permissions held by nobody, the write-only screens hidden. */
+function companionPreview(): boolean {
+  try {
+    if (window.location.hash.includes('companion')) localStorage.setItem('pims.companion', '1')
+    return localStorage.getItem('pims.companion') === '1'
+  } catch {
+    return window.location.hash.includes('companion')
+  }
+}
+
+const COMPANION_BLOCKED = new Set(['txn.post', 'txn.void', 'order.write', 'order.close', 'qc.write'])
+
+const COMPANION_ALLOWED_WRITES = [
+  /^\/api\/auth\/(login|logout|pin)$/,
+  /^\/api\/orders\/\d+\/qc\/validate$/,
+  /^\/api\/lims\/(matrix|ingest)$/,
+  /^\/api\/inquiry\/[^/]+(\/csv)?$/,
+  /^\/api\/query\/run(\/csv)?$/,
+  /^\/api\/query\/saved(\/\d+)?$/,
+  /^\/api\/alerts\/(run|\d+\/acknowledge)$/,
+  /^\/api\/jobs\/[^/]+\/run$/,
+  /^\/api\/specs$/,
+  /^\/api\/materials\/\d+\/tests$/,
+  /^\/api\/legacy\/sync$/,
+]
+
+const LEGACY_SCREENS: [RegExp, string][] = [
+  [/^\/api\/transactions\/receive/, 'Order Selection Menu → Receive'],
+  [/^\/api\/transactions\/produce/, 'Order Selection Menu → Produce'],
+  [/^\/api\/transactions\/move/, 'Order Selection Menu → Move'],
+  [/^\/api\/transactions\/load/, 'Order Selection Menu → Load Trailer'],
+  [/^\/api\/transactions\/shrink/, 'Order Selection Menu → Shrinkage'],
+  [/^\/api\/transactions\/\d+\/void/, "the order's transactions in PIMS"],
+  [/^\/api\/shipments\//, 'Order Selection Menu → Ship Trailer'],
+  [/^\/api\/blend\//, 'Order Selection Menu → Produce'],
+  [/^\/api\/orders\/close/, 'Order Edit Menu → Close Selected Orders'],
+  [/^\/api\/orders\/\d+\/qc/, 'Quality Control → Regular QC'],
+  [/^\/api\/qc\//, 'Quality Control → Regular QC'],
+  [/^\/api\/orders\/\d+\/in-process/, 'Quality Control → In Process Testing'],
+  [/^\/api\/orders\/\d+\/qa-checklist/, 'QA Checklist'],
+  [/^\/api\/orders\/\d+$/, 'Order Edit Menu → Edit Selected Order'],
+  [/^\/api\/orders$/, 'Order Edit Menu → Create Order'],
+]
+
+const companionSyncedAt = Date.now() - 3 * 60_000
+
 export async function handle(method: string, path: string, body: Row = {}): Promise<any> {
   requestCount += 1
   try {
+    const bare = path.split('?')[0]
+    if (companionPreview()) {
+      if (method === 'GET' && bare === '/api/legacy/status') {
+        return {
+          mode: 'companion', companion: true, configured: true,
+          last_sync: new Date(companionSyncedAt).toISOString(),
+          age_minutes: Math.round((Date.now() - companionSyncedAt) / 60_000),
+          orphans: {}, unclassified_transaction_types: [],
+        }
+      }
+      if (method !== 'GET' && !COMPANION_ALLOWED_WRITES.some((pattern) => pattern.test(bare))) {
+        const screen = LEGACY_SCREENS.find(([pattern]) => pattern.test(bare))?.[1] ?? null
+        const where = screen ? ` in the PIMS desktop application (${screen})` : ' in the PIMS desktop application'
+        fail(409, 'companion_read_only',
+          'This is the read-only companion to PIMS, so it cannot change anything. '
+          + `Make this change${where}; it will appear here at the next sync.`,
+          { legacy_screen: screen, path: bare })
+      }
+      const result = await route(method, path, body)
+      if (method === 'GET' && bare === '/api/health') return { ...result, mode: 'companion' }
+      if (method === 'GET' && bare === '/api/auth/me' && result?.permissions) {
+        return { ...result, permissions: companionPermissions(result.permissions) }
+      }
+      if (method === 'POST' && bare === '/api/auth/login' && result?.user) {
+        return { ...result, user: { ...result.user, permissions: companionPermissions(result.user.permissions) } }
+      }
+      return result
+    }
     return await route(method, path, body)
   } catch (error: any) {
     const shaped = error && typeof error === 'object' && 'code' in error

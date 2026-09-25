@@ -40,6 +40,8 @@ interface AppState {
   reloadReference: () => void
   logout: () => void
   kiosk: boolean
+  /** A read-only mirror of the legacy PIMS: nothing here can change anything. */
+  companion: boolean
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -56,15 +58,23 @@ const KIOSK_KEY = 'pims.kiosk'
 /** Sign a shared terminal out after this long with nobody touching it. */
 const KIOSK_IDLE_SECONDS = 180
 
-interface NavItem { route: string; label: string; icon: string; permission?: string; kiosk?: boolean }
+interface NavItem {
+  route: string
+  label: string
+  icon: string
+  permission?: string
+  kiosk?: boolean
+  /** A screen whose whole purpose is recording changes — hidden in a read-only companion. */
+  writes?: boolean
+}
 
 const NAV: { group: string; items: NavItem[] }[] = [
   { group: 'Operations', items: [
     { route: 'dashboard', label: 'Dashboard', icon: '▤' },
-    { route: 'load-ship', label: 'Load & ship', icon: '⇢', kiosk: true },
-    { route: 'blend', label: 'Blend', icon: '⚗', kiosk: true },
+    { route: 'load-ship', label: 'Load & ship', icon: '⇢', kiosk: true, writes: true },
+    { route: 'blend', label: 'Blend', icon: '⚗', kiosk: true, writes: true },
     { route: 'orders', label: 'Orders', icon: '▦', kiosk: true },
-    { route: 'operations', label: 'Plant floor', icon: '⚙', kiosk: true },
+    { route: 'operations', label: 'Plant floor', icon: '⚙', kiosk: true, writes: true },
     { route: 'inventory', label: 'Inventory', icon: '⛁', kiosk: true },
   ]},
   { group: 'Analysis', items: [
@@ -223,7 +233,9 @@ function Shell({
   const [reference, setReference] = useState<Reference | null>(null)
   const [referenceError, setReferenceError] = useState<unknown>(null)
   const [nonce, setNonce] = useState(0)
-  const [health, setHealth] = useState<{ environment: string } | null>(null)
+  const [health, setHealth] = useState<{ environment: string; mode?: string } | null>(null)
+  const [mirror, setMirror] = useState<{ age_minutes: number | null; last_sync: string | null } | null>(null)
+  const companion = health?.mode === 'companion'
 
   useEffect(() => {
     api.get<Reference>(`/api/reference?plant_id=${plantId}`)
@@ -231,7 +243,19 @@ function Shell({
       .catch(setReferenceError)
   }, [plantId, nonce])
 
-  useEffect(() => { api.get<{ environment: string }>('/api/health').then(setHealth).catch(() => undefined) }, [])
+  useEffect(() => {
+    api.get<{ environment: string; mode?: string }>('/api/health').then(setHealth).catch(() => undefined)
+  }, [])
+
+  // How fresh the mirror is, refreshed every minute: a read-only view that is
+  // quietly out of date is the failure this banner exists to prevent.
+  useEffect(() => {
+    if (!companion) return undefined
+    const load = () => api.get<any>('/api/legacy/status').then(setMirror).catch(() => undefined)
+    load()
+    const timer = setInterval(load, 60_000)
+    return () => clearInterval(timer)
+  }, [companion])
 
   const setPlantId = useCallback((id: number) => {
     localStorage.setItem('pims.plant', String(id))
@@ -267,11 +291,11 @@ function Shell({
     () => reference ? {
       user, reference, plantId, plantCode, setPlantId,
       environment: health?.environment ?? '',
-      navigate, can, kiosk,
+      navigate, can, kiosk, companion,
       reloadReference: () => setNonce((n) => n + 1),
       logout,
     } : null,
-    [user, reference, plantId, plantCode, setPlantId, health, navigate, can, logout, kiosk],
+    [user, reference, plantId, plantCode, setPlantId, health, navigate, can, logout, kiosk, companion],
   )
 
   const page = route[0] || (kiosk ? 'load-ship' : 'dashboard')
@@ -291,7 +315,9 @@ function Shell({
           </div>
           <nav className="nav">
             {NAV.map((section) => {
-              const items = section.items.filter((item) => !item.permission || can(item.permission))
+              const items = section.items.filter(
+                (item) => (!item.permission || can(item.permission)) && !(companion && item.writes),
+              )
               if (!items.length) return null
               return (
                 <div key={section.group}>
@@ -344,6 +370,18 @@ function Shell({
                 {health.environment || 'unknown'}
               </span>
             )}
+            {companion && (
+              <span
+                className={`companion-banner${mirror?.age_minutes == null || mirror.age_minutes > 45 ? ' stale' : ''}`}
+                title="Every screen here is a mirror of the PIMS database. Nothing here can change it."
+              >
+                Read-only mirror of PIMS
+                {' · '}
+                {mirror?.age_minutes == null
+                  ? 'never synced'
+                  : mirror.age_minutes < 1 ? 'synced just now' : `synced ${Math.round(mirror.age_minutes)} min ago`}
+              </span>
+            )}
             <div className="spacer" />
             {state && <ScanBox plantId={plantId} onNavigate={navigate} />}
             <label className="row small" style={{ gap: 6 }}>
@@ -368,9 +406,11 @@ function Shell({
                 in-browser demo
               </span>
             )}
-            <button className="ghost sm" onClick={onEnterKiosk} title="Shared plant terminal mode">
-              Kiosk
-            </button>
+            {!companion && (
+              <button className="ghost sm" onClick={onEnterKiosk} title="Shared plant terminal mode">
+                Kiosk
+              </button>
+            )}
             <button className="ghost sm" onClick={() => logout()}>Sign out</button>
           </header>
         )}
@@ -379,10 +419,35 @@ function Shell({
           {referenceError ? <ErrorBox error={referenceError} /> : null}
           {!state ? <Loading /> : (
             <AppContext.Provider value={state}>
-              <Route path={route.length ? route : [page]} />
+              {companion && WRITE_ROUTES.has(page)
+                ? <RecordInPims page={titleFor(page)} />
+                : <Route path={route.length ? route : [page]} />}
             </AppContext.Provider>
           )}
         </main>
+      </div>
+    </div>
+  )
+}
+
+const WRITE_ROUTES = new Set(
+  NAV.flatMap((section) => section.items).filter((item) => item.writes).map((item) => item.route),
+)
+
+/** Shown in a companion in place of a screen that exists to record changes. */
+function RecordInPims({ page }: { page: string }) {
+  const { navigate } = useApp()
+  return (
+    <div className="card" style={{ maxWidth: 640 }}>
+      <div className="body">
+        <h2 style={{ marginTop: 0 }}>{page} happens in PIMS</h2>
+        <p>
+          This is the read-only companion to PIMS. It mirrors the PIMS database so you
+          can search, report and check it, but it cannot change anything — so loads,
+          blends and movements are still recorded in the PIMS desktop application, and
+          appear here at the next sync.
+        </p>
+        <button className="primary" onClick={() => navigate('dashboard')}>Back to the dashboard</button>
       </div>
     </div>
   )

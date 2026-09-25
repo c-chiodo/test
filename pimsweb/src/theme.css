@@ -641,3 +641,16 @@ body.kiosk .pinpad button { min-height: 68px; }
 .scan-start input { flex: 1 1 220px; min-width: 180px; font-size: 16px; }
 body.kiosk .scan-start input { font-size: 19px; }
 body.kiosk .scan-start label { font-size: 17px; }
+
+/* The companion's standing statement: this is a mirror, and how fresh. */
+.companion-banner {
+  font-size: 12px; font-weight: 600; white-space: nowrap;
+  padding: 3px 10px; border-radius: 999px;
+  background: var(--info-soft); color: var(--info);
+  border: 1px solid color-mix(in srgb, var(--info) 30%, transparent);
+}
+.companion-banner.stale {
+  background: var(--warn-soft); color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+}
+.topbar button, .topbar label, .topbar .env-banner { white-space: nowrap; }

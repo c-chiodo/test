@@ -11,12 +11,17 @@ linked servers to LabWare LIMS, Great Plains and Active Directory.
 This directory documents the replacement: what it does, how it is supported,
 what was wrong with the old one, and how to cut over.
 
+**With read-only access to the legacy database, start with
+[PIMS_COMPANION.md](PIMS_COMPANION.md):** the same application run as a
+read-only mirror beside the legacy PIMS, which stays the system of record.
+
 | Document | What it covers |
 |---|---|
 | this file | architecture, screen-by-screen parity, what is and is not built |
 | [PIMS_RUNBOOK.md](PIMS_RUNBOOK.md) | running and supporting it: deploy, health, common issues |
 | [PIMS_DEFECTS.md](PIMS_DEFECTS.md) | the legacy defect register and how each is addressed |
 | [PIMS_MIGRATION.md](PIMS_MIGRATION.md) | cutover from SQL Server / stored procedures |
+| [PIMS_COMPANION.md](PIMS_COMPANION.md) | **running read-only alongside the legacy system** — and why it cannot affect production |
 
 ## Why replace rather than patch
 

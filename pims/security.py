@@ -288,11 +288,39 @@ def public_user(user: dict, conn=None) -> dict:
         "email": user.get("email", ""),
         "role": user["role"],
         "plants": plants_for_user(user["user_id"], conn),
-        "permissions": sorted(ROLE_PERMISSIONS.get(user["role"], set())),
+        "permissions": sorted(
+            _granted(user) if get_settings().companion
+            else ROLE_PERMISSIONS.get(user["role"], set())
+        ),
     }
 
 
+#: What a companion refuses to anyone, admins included: every action that
+#: would change a mirrored table. The legacy desktop app is the system of
+#: record, and a change here would be overwritten by the next sync — or worse,
+#: believed. (Product limits, saved queries and alert acknowledgements are the
+#: companion's own data and stay editable.)
+COMPANION_BLOCKED = frozenset({
+    "txn.post", "txn.void", "order.write", "order.close", "qc.write",
+})
+
+ALL_PERMISSIONS = frozenset(
+    p for granted in ROLE_PERMISSIONS.values() for p in granted if p != "*"
+) | {"spec.write"}
+
+
+def _granted(user: dict) -> set[str]:
+    granted = set(ROLE_PERMISSIONS.get(user.get("role", ""), set()))
+    if "*" in granted:
+        granted = set(ALL_PERMISSIONS)
+    if get_settings().companion:
+        granted -= COMPANION_BLOCKED
+    return granted
+
+
 def has_permission(user: dict, permission: str) -> bool:
+    if get_settings().companion and permission in COMPANION_BLOCKED:
+        return False
     granted = ROLE_PERMISSIONS.get(user.get("role", ""), set())
     return "*" in granted or permission in granted
 

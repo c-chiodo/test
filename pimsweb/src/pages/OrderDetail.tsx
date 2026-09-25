@@ -47,7 +47,9 @@ export default function OrderDetail({ orderId }: { orderId: number }) {
         </div>
         <div className="actions">
           <button onClick={() => navigate('orders')}>← All orders</button>
-          <button onClick={() => navigate(`operations?order=${data.order_id}`)}>Post movement</button>
+          {can('txn.post') && (
+            <button onClick={() => navigate(`operations?order=${data.order_id}`)}>Post movement</button>
+          )}
         </div>
       </div>
 

@@ -245,3 +245,15 @@ The seed loaded every sales order to its full quantity, so "Sales orders ready
 to load" was a screen of orders with nothing left to load. Roughly half of the
 open sales orders now carry a partial load, which is what a loadout screen
 looks at for most of a shift.
+
+---
+
+## Defects found in the replacement, 2026-09-25
+
+Found while building the read-only companion, and fixed with it.
+
+| # | What went wrong | Cause | Fix |
+|---|---|---|---|
+| R-28 | The live-LIMS reader would have failed on its first real run with "invalid column name". | Its query was written against guessed LabWare names — `ResultValue`, `SampledDate`, a join on `TestCode` — none of which exist. It had only ever run against the stub. | Rewritten to the schema the legacy matrix procedures themselves use: `ComponentValue`, integer `RegisterDate`, joins on `SampleCode` + `AuditFlag` + `TestPosition`, and their `TestStatus <= 40` filter. It now also goes through the read-only guard and login preflight. |
+| R-29 | A standing order that fell behind — the job down over a holiday — created one catch-up order per run until it had caught up: five weeks late meant five orders for the same customer, one per run. | `run_recurring` advanced `next_run` by one period, not past today. | It advances past today: one order for the current period, and the schedule back on track. |
+| R-30 | "Plant floor", "Ship trailer" and "Post movement" were shown to users who could not post — a QC user saw the button and then got a refusal. | Three navigation shortcuts had no permission check. | Gated on `txn.post`, which also hides them in companion mode. |

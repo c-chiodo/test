@@ -10,6 +10,7 @@ Run with ``uvicorn pims.app:app``; interactive docs at ``/docs``.
 
 from __future__ import annotations
 
+import re
 import traceback
 import uuid
 from contextlib import asynccontextmanager
@@ -82,6 +83,78 @@ async def _observe(request: Request, call_next):
             correlation_id=correlation_id,
         )
     return response
+
+
+#: Writes a read-only companion still accepts: they touch only the
+#: companion's own data (sessions, saved queries, alert acknowledgements,
+#: product limits, the mirror itself) or are reads that happen to be POSTs.
+#: Everything else that is not a GET is refused — an allowlist, so a write
+#: endpoint added later is blocked in companion mode until someone decides
+#: otherwise.
+COMPANION_ALLOWED_WRITES = [
+    re.compile(pattern) for pattern in (
+        r"^/api/auth/(login|logout|pin)$",
+        r"^/api/orders/\d+/qc/validate$",
+        r"^/api/lims/(matrix|ingest)$",
+        r"^/api/inquiry/[^/]+(/csv)?$",
+        r"^/api/query/run(/csv)?$",
+        r"^/api/query/saved(/\d+)?$",
+        r"^/api/alerts/(run|\d+/acknowledge)$",
+        r"^/api/jobs/[^/]+/run$",
+        r"^/api/specs$",
+        r"^/api/materials/\d+/tests$",
+        r"^/api/legacy/sync$",
+    )
+]
+
+#: Where the same change is made in the legacy desktop application, so a
+#: refusal is a direction rather than a dead end.
+LEGACY_SCREENS = [
+    (r"^/api/transactions/receive", "Order Selection Menu → Receive"),
+    (r"^/api/transactions/produce", "Order Selection Menu → Produce"),
+    (r"^/api/transactions/move", "Order Selection Menu → Move"),
+    (r"^/api/transactions/load", "Order Selection Menu → Load Trailer"),
+    (r"^/api/transactions/shrink", "Order Selection Menu → Shrinkage"),
+    (r"^/api/transactions/\d+/void", "the order's transactions in PIMS"),
+    (r"^/api/shipments/", "Order Selection Menu → Ship Trailer"),
+    (r"^/api/blend/", "Order Selection Menu → Produce"),
+    (r"^/api/orders/close", "Order Edit Menu → Close Selected Orders"),
+    (r"^/api/orders/\d+/qc", "Quality Control → Regular QC"),
+    (r"^/api/qc/", "Quality Control → Regular QC"),
+    (r"^/api/orders/\d+/in-process", "Quality Control → In Process Testing"),
+    (r"^/api/orders/\d+/qa-checklist", "QA Checklist"),
+    (r"^/api/orders/\d+$", "Order Edit Menu → Edit Selected Order"),
+    (r"^/api/orders$", "Order Edit Menu → Create Order"),
+]
+
+
+@app.middleware("http")
+async def _companion_read_only(request: Request, call_next):
+    if (
+        settings.companion
+        and request.method not in {"GET", "HEAD", "OPTIONS"}
+        and request.url.path.startswith("/api/")
+        and not any(p.match(request.url.path) for p in COMPANION_ALLOWED_WRITES)
+    ):
+        screen = next(
+            (label for pattern, label in LEGACY_SCREENS if re.match(pattern, request.url.path)),
+            None,
+        )
+        where = f" in the PIMS desktop application ({screen})" if screen else " in the PIMS desktop application"
+        return JSONResponse(
+            status_code=409,
+            content={
+                "code": "companion_read_only",
+                "message": (
+                    "This is the read-only companion to PIMS, so it cannot change "
+                    f"anything. Make this change{where}; it will appear here at the "
+                    "next sync."
+                ),
+                "detail": {"legacy_screen": screen, "path": request.url.path},
+                "correlation_id": getattr(request.state, "correlation_id", "-"),
+            },
+        )
+    return await call_next(request)
 
 
 @app.exception_handler(PimsError)
@@ -752,6 +825,16 @@ def run_job(job: str, payload: dict = Body(default={}), user: dict = User) -> di
     security.require_permission(user, "support.read")
     plant_id = payload.get("plant_id")
     dry_run = bool(payload.get("dry_run", False))
+    if settings.companion and job in {"auto-close", "recurring", "gp-sync"}:
+        raise PimsError(
+            f"The {job} job changes orders or master data, which a read-only "
+            "companion takes from the legacy database instead.",
+            job=job,
+        )
+    if job == "legacy-sync":
+        from .legacy import service as legacy_service
+
+        return legacy_service.sync(full=bool(payload.get("full")))
     if job == "daily":
         return jobs.daily(plant_id, send=not dry_run)
     if job == "alerts":
@@ -814,7 +897,38 @@ def latest_scale_reading(
 def health_endpoint() -> dict:
     """Unauthenticated liveness probe — safe for a load balancer."""
 
-    return health.liveness()
+    result = health.liveness()
+    result["mode"] = "companion" if settings.companion else "standalone"
+    return result
+
+
+@app.get("/api/legacy/status", tags=["legacy"])
+def legacy_status(user: dict = User) -> dict:
+    """Is this a read-only mirror, and how fresh is it — for the UI banner."""
+
+    from .legacy import service as legacy_service
+
+    return legacy_service.status()
+
+
+@app.get("/api/legacy/check", tags=["legacy"])
+def legacy_check(counts: bool = False, user: dict = User) -> dict:
+    """Compare the legacy map with the database. Reads column names only."""
+
+    from .legacy import service as legacy_service
+
+    security.require_permission(user, "support.read")
+    return legacy_service.check(counts=counts)
+
+
+@app.post("/api/legacy/sync", tags=["legacy"])
+def legacy_sync(payload: dict = Body(default={}), user: dict = User) -> dict:
+    """Run the mirror now. Reads the legacy database; writes only locally."""
+
+    from .legacy import service as legacy_service
+
+    security.require_permission(user, "support.read")
+    return legacy_service.sync(full=bool(payload.get("full")))
 
 
 @app.get("/api/support/diagnostics", tags=["support"])

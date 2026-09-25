@@ -536,3 +536,35 @@ def test_kiosk_list_only_shows_operators_for_that_plant(conn):
 def test_pins_must_be_digits(conn):
     with pytest.raises(ValidationError):
         security.set_pin("toperator", "abcd", conn)
+
+
+def test_a_standing_order_that_fell_behind_catches_up_with_one_order(conn, admin_user):
+    """Five missed weeks is one order and a schedule back on track, not five orders."""
+
+    from datetime import date, timedelta
+
+    weeks_ago = (date.today() - timedelta(weeks=5)).isoformat()
+    standing = jobs.create_recurring(
+        {
+            "name": "Weekly MGR — fell behind",
+            "cadence": "weekly",
+            "weekday": None,
+            "lead_days": 1,
+            "next_run": weeks_ago,
+            "template": {
+                "order_type_id": 1,
+                "plant_id": 1,
+                "company_id": 1,
+                "department_id": 2,
+                "customer_id": 2,
+                "material_one_id": _material("01031", conn),
+                "material_one_quantity": 12_000,
+            },
+        },
+        admin_user,
+        conn,
+    )
+    mine = lambda result: [c for c in result["created"] if c["recurring_id"] == standing["recurring_id"]]  # noqa: E731
+    assert len(mine(jobs.run_recurring(conn=conn))) == 1
+    assert mine(jobs.run_recurring(conn=conn)) == []
+    assert jobs.get_recurring(standing["recurring_id"], conn)["next_run"] > date.today().isoformat()

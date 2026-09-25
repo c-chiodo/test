@@ -244,6 +244,10 @@ def init_db(settings: Settings | None = None, seed: bool | None = None) -> None:
     create_schema(conn)
     apply_migrations(conn)
     should_seed = settings.auto_seed if seed is None else seed
+    if settings.companion:
+        # A companion's tables are a mirror of the legacy database. Demo data
+        # in them would be indistinguishable from the real thing.
+        should_seed = False
     if should_seed and is_empty(conn):
         from . import seed as seed_module
 

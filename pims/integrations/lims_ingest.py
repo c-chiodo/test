@@ -16,6 +16,8 @@ Adapters
 
 from __future__ import annotations
 
+from datetime import date, timedelta
+
 import random
 from typing import Any, Iterable, Protocol
 
@@ -27,16 +29,26 @@ from ..util import utc_now_iso
 
 #: The query the real adapter runs. Kept here as the single statement of what
 #: "a result worth showing" means, and mirrored in docs/PIMS_MIGRATION.md.
+#: The live LabWare query. Table and column names, joins and filters are the
+#: ones the legacy matrix procedures themselves use (PIMS_Matrix_Fix.sql):
+#: samples, tests and results joined on SampleCode + AuditFlag (+ TestPosition
+#: for results), current versions only (AuditFlag = 0), reportable components
+#: only (IncludeInReport = 1 — the filter whose absence caused FE-2026-001),
+#: tests at a reportable status (TestStatus <= 40), no DATE- components.
+#: LabWare stores dates as integers (YYYYMMDD), so the cutoff is passed as one.
 SOURCE_QUERY = """
-SELECT s.SampleCode, st.TestCode, sr.ComponentName, sr.ResultValue, s.SampledDate
+SELECT s.SampleCode, st.TestCode, sr.ComponentName, sr.ComponentValue, s.RegisterDate
 FROM   {db}.dbo.Samples       s
 JOIN   {db}.dbo.SampleTests   st ON st.SampleCode = s.SampleCode
-JOIN   {db}.dbo.SampleResults sr ON sr.SampleCode = s.SampleCode
-                                AND sr.TestCode   = st.TestCode
-WHERE  st.AuditFlag = 0                 -- current version only
-  AND  sr.IncludeInReport = 1           -- the filter whose absence caused FE-2026-001
-  AND  sr.ComponentName NOT LIKE 'DATE-%'
-  AND  s.SampledDate >= DATEADD(day, -?, GETDATE())
+                                AND st.AuditFlag  = s.AuditFlag
+JOIN   {db}.dbo.SampleResults sr ON sr.SampleCode   = st.SampleCode
+                                AND sr.AuditFlag    = st.AuditFlag
+                                AND sr.TestPosition = st.TestPosition
+WHERE  s.AuditFlag = 0
+  AND  sr.IncludeInReport = 1
+  AND  st.TestStatus <= 40
+  AND  sr.ComponentName NOT LIKE '%DATE-%'
+  AND  s.RegisterDate >= ?
 """
 
 
@@ -109,7 +121,13 @@ class StubSource:
 
 
 class SqlServerSource:
-    """The live LIMS. Requires pyodbc and a reachable linked server."""
+    """The live LIMS, read through the same read-only door as the legacy mirror.
+
+    Connect straight to the LIMS server (``PHLIMSSQL``) where you can: reading
+    ``PHLIMSSQL.XLIMSFEEDGROUP`` *through* the PIMS server makes that server
+    run the distributed query on your behalf, which is load on production
+    PIMS that a direct connection avoids entirely.
+    """
 
     name = "sqlserver"
 
@@ -118,28 +136,42 @@ class SqlServerSource:
         self.database = database
 
     def fetch(self, since_days: int) -> list[dict[str, Any]]:
-        try:
-            import pyodbc                          # noqa: PLC0415
-        except ImportError as exc:                 # pragma: no cover - env dependent
-            raise IntegrationError(
-                "pyodbc is not installed; add it to requirements.txt to read the live LIMS.",
-                adapter="sqlserver",
-            ) from exc
-        query = SOURCE_QUERY.format(db=self.database)
-        with pyodbc.connect(self.dsn, timeout=30) as connection:  # pragma: no cover
-            cursor = connection.cursor()
-            cursor.execute(query, since_days)
-            columns = [column[0] for column in cursor.description]
+        from ..legacy.readonly import connect_mssql
+
+        cutoff = int((date.today() - timedelta(days=since_days)).strftime("%Y%m%d"))
+        tables = tuple(
+            f"{self.database}.dbo.{name}" for name in ("Samples", "SampleTests", "SampleResults")
+        )
+        connection = connect_mssql(self.dsn, tables=tables)     # pragma: no cover
+        try:                                                    # pragma: no cover
             return [
                 {
-                    "sample_code": row[columns.index("SampleCode")],
-                    "test_code": row[columns.index("TestCode")],
-                    "component": row[columns.index("ComponentName")],
-                    "value": row[columns.index("ResultValue")],
-                    "sampled_at": str(row[columns.index("SampledDate")]),
+                    "sample_code": row["SampleCode"],
+                    "test_code": row["TestCode"],
+                    "component": row["ComponentName"],
+                    "value": _number(row["ComponentValue"]),
+                    "sampled_at": _labware_date(row["RegisterDate"]),
                 }
-                for row in cursor.fetchall()
+                for row in connection.rows(SOURCE_QUERY.format(db=self.database), (cutoff,))
             ]
+        finally:                                                # pragma: no cover
+            connection.close()
+
+
+def _number(value: Any) -> float | None:
+    try:
+        return float(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _labware_date(value: Any) -> str:
+    """LabWare's integer YYYYMMDD as an ISO date."""
+
+    text = str(value or "").strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    return text
 
 
 def build_source(mode: str | None = None, dsn: str | None = None) -> Source:

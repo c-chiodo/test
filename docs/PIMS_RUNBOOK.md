@@ -355,3 +355,17 @@ other movement.
   screen shows which component and how much is on hand.
 - Batch history: `GET /api/blend/batches/{id}`, or filter Activity by the
   order.
+
+## 18. Companion mode (read-only beside the legacy PIMS)
+
+Full detail, including exactly why it cannot affect production:
+[PIMS_COMPANION.md](PIMS_COMPANION.md). The support questions:
+
+| Symptom | Check |
+|---|---|
+| Banner amber, "synced 90 min ago" | `python -m pims legacy status`; job history for `legacy.sync`. The health check degrades at 45 minutes and fails at 6 hours. |
+| Sync refuses to start: "can change the database" | Working as designed — the login it was given can write. Ask the DBA for `db_datareader` only. A PIMS user login will not do: those hold `EXECUTE`. |
+| `legacy check` shows FAIL on a table | The legacy schema differs from the map. Send the report (or the readiness script's output); fix `pims/legacy/schema.py`. |
+| A number in PIMS is not in the companion yet | Recent rows arrive at the next 15-minute sync; edits to rows older than the window (14 days, 180 for orders) and deletions arrive at the weekly `--full`. |
+| Someone asks the companion to record a load | It cannot, by design; the refusal names the legacy screen to use. |
+| "Tote Fill" (or similar) under unclassified transaction types | A legacy type the mirror could not classify by name. It still counts toward balances; add the word to `TYPE_WORDS` in `pims/legacy/mirror.py` if it belongs to a known kind. |

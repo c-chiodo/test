@@ -100,6 +100,23 @@ class Settings:
 
     session_hours: int = 12
 
+    # "standalone" — PIMS owns its database and every screen works.
+    # "companion"  — PIMS is a read-only mirror of the legacy ProductionData
+    #                database; every write is refused and points back to the
+    #                legacy desktop application. See docs/PIMS_COMPANION.md.
+    mode: str = "standalone"
+    # ODBC connection string for the legacy database (or sqlite:/// for a
+    # stand-in). Nothing connects to the legacy database unless this is set.
+    legacy_dsn: str = ""
+    # Where legacy user names live: a different database on the same server.
+    legacy_users_table: str = "FECoreData.dbo.[User]"
+    # How far back each incremental sync re-reads, in days.
+    legacy_window_days: int = 14
+
+    @property
+    def companion(self) -> bool:
+        return self.mode.strip().lower() == "companion"
+
     @property
     def sqlite_path(self) -> Path:
         if not self.database_url.startswith("sqlite:///"):
@@ -136,6 +153,10 @@ def get_settings() -> Settings:
             lims_warn_hours=int(os.environ.get("PIMS_LIMS_WARN_HOURS", "24")),
             lims_fail_hours=int(os.environ.get("PIMS_LIMS_FAIL_HOURS", "72")),
             session_hours=int(os.environ.get("PIMS_SESSION_HOURS", "12")),
+            mode=os.environ.get("PIMS_MODE", "standalone"),
+            legacy_dsn=os.environ.get("PIMS_LEGACY_DSN", ""),
+            legacy_users_table=os.environ.get("PIMS_LEGACY_USERS_TABLE", "FECoreData.dbo.[User]"),
+            legacy_window_days=int(os.environ.get("PIMS_LEGACY_WINDOW_DAYS", "14")),
         )
     return _settings
 
