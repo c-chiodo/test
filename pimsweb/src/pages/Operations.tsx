@@ -163,10 +163,12 @@ export function useTanks() {
   const ids = useMemo(() => new Map(reference.materials.map((m) => [m.number, m.material_id])), [reference.materials])
   const tiles = board.data?.tanks ?? []
   const holds = (tile: TankTile, materialId: number | null | undefined) =>
-    tile.products.find((p) => p.lbs > 0.5 && ids.get(p.number) === materialId)?.lbs ?? 0
+    tile.products.find((p) => p.lbs > 0.5 && (p.material_id ?? ids.get(p.number)) === materialId)?.lbs ?? 0
   const mainProduct = (tile: TankTile) => {
     const top = tile.products.find((p) => p.lbs > 0.5)
-    return top ? { ...top, material_id: ids.get(top.number) ?? null } : null
+    // The tile says which material; the plant's list is only a fallback for
+    // an older server. A tank can hold a product that is not listed for its plant.
+    return top ? { ...top, material_id: top.material_id ?? ids.get(top.number) ?? null } : null
   }
   return { board, tiles, holds, mainProduct }
 }
@@ -401,8 +403,10 @@ function useScale(trailer = '') {
   return reading
 }
 
-const materialLabel = (reference: any, id: number | null | undefined) => {
+const materialLabel = (reference: any, id: number | null | undefined, tile?: TankTile) => {
   const m = reference.materials.find((row: any) => row.material_id === id)
+    // Not listed for this plant, but the tank knows what it holds.
+    ?? tile?.products.find((p) => p.material_id === id)
   return m ? `${m.number} ${m.description}` : 'product'
 }
 const tankNumber = (tiles: TankTile[], id: number | null) => tiles.find((t) => t.location_id === id)?.number ?? '—'
@@ -606,7 +610,7 @@ function MoveJob() {
         <Step n={2} title="Which product?" hint={`${source.number} holds more than one`}>
           <div className="row" style={{ gap: 8 }}>
             {inSource.map((p) => {
-              const id = reference.materials.find((m) => m.number === p.number)?.material_id ?? null
+              const id = p.material_id ?? reference.materials.find((m) => m.number === p.number)?.material_id ?? null
               return (
                 <button key={p.number} className={materialId === id ? 'primary' : ''} onClick={() => setMaterialId(id)}>
                   {p.number} · {fmtLbs(p.lbs)} lbs
@@ -618,7 +622,7 @@ function MoveJob() {
       )}
       {source && materialId && (
         <>
-          <Step n={inSource.length > 1 ? 3 : 2} title="To which tank?" hint={`Tanks holding ${materialLabel(reference, materialId)} come first`}>
+          <Step n={inSource.length > 1 ? 3 : 2} title="To which tank?" hint={`Tanks holding ${materialLabel(reference, materialId, source)} come first`}>
             <TankPicker tiles={tiles} value={to} onChange={setTo} mode="to" materialId={materialId} qty={n}
               holds={holds} mainProduct={mainProduct} exclude={from} />
           </Step>
@@ -633,7 +637,7 @@ function MoveJob() {
                 to_location_id: to, to_material_id: materialId, to_qty: n, ...form,
               })}>
               {busy ? <span className="spinner" /> : null}
-              Move {fmtLbs(n)} lbs of {materialLabel(reference, materialId)} from {source.number} to {tankNumber(tiles, to)}
+              Move {fmtLbs(n)} lbs of {materialLabel(reference, materialId, source)} from {source.number} to {tankNumber(tiles, to)}
             </button>
           </div>
         </>
@@ -675,7 +679,7 @@ function ShrinkJob() {
       </Step>
       {source && materialId && (
         <>
-          <Step n={2} title="How much was lost?" hint={`${materialLabel(reference, materialId)} in ${source.number}`}>
+          <Step n={2} title="How much was lost?" hint={`${materialLabel(reference, materialId, source)} in ${source.number}`}>
             <Qty value={qty} onChange={setQty} max={available} maxLabel="The whole heel" />
           </Step>
           <Step n={3} title="Why?">
@@ -693,7 +697,7 @@ function ShrinkJob() {
                 ...form, remarks: [reason, form.remarks].filter(Boolean).join(' — '),
               })}>
               {busy ? <span className="spinner" /> : null}
-              Write off {fmtLbs(n)} lbs of {materialLabel(reference, materialId)} from {source.number}
+              Write off {fmtLbs(n)} lbs of {materialLabel(reference, materialId, source)} from {source.number}
             </button>
           </div>
         </>

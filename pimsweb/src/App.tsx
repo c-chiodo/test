@@ -27,6 +27,7 @@ import TankBoard from './pages/TankBoard'
 import Operations from './pages/Operations'
 import Inventory from './pages/Inventory'
 import Inquiry from './pages/Inquiry'
+import Reports from './pages/Reports'
 import QueryBuilder from './pages/QueryBuilder'
 import Specs from './pages/Specs'
 import Support from './pages/Support'
@@ -90,6 +91,7 @@ const NAV: { group: string; items: NavItem[] }[] = [
     { route: 'inventory', label: 'Inventory', icon: '⛁' },
   ]},
   { group: 'Analysis', items: [
+    { route: 'reports', label: 'Reports', icon: '▥' },
     { route: 'inquiry', label: 'Inquiry', icon: '⌕' },
     { route: 'query', label: 'Custom query', icon: '⧉' },
     { route: 'specs', label: 'Products & limits', icon: '✓' },
@@ -563,6 +565,8 @@ function Route({ path }: { path: string[] }) {
       return <Inventory />
     case 'inquiry':
       return <Inquiry initialTab={param} />
+    case 'reports':
+      return <Reports key={param} initialTab={param} />
     case 'query':
       return <QueryBuilder />
     case 'specs':
@@ -586,6 +590,7 @@ function titleFor(page: string): string {
     operations: 'Plant floor',
     inventory: 'Inventory',
     inquiry: 'Inquiry',
+    reports: 'Reports',
     query: 'Custom query',
     specs: 'Products & limits',
     support: 'Support console',

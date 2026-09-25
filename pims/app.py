@@ -27,7 +27,7 @@ from .integrations import gp_sync, lims_ingest
 from .integrations import scale as scale_integration
 from .services import (
     alerts, blend, departments, display, inquiry, inventory, jobs, lims, loadblend, numbering, orders,
-    prefill, process, qc, query, reference, scan, specs,
+    prefill, process, qc, query, reference, reports, scan, specs,
 )
 from .util import utc_now
 
@@ -98,6 +98,7 @@ COMPANION_ALLOWED_WRITES = [
         r"^/api/lims/(matrix|ingest)$",
         r"^/api/inquiry/[^/]+(/csv)?$",
         r"^/api/query/run(/csv)?$",
+        r"^/api/reports/[^/]+(/csv)?$",
         r"^/api/query/saved(/\d+)?$",
         r"^/api/alerts/(run|\d+/acknowledge)$",
         r"^/api/jobs/[^/]+/run$",
@@ -869,6 +870,24 @@ def inquiry_csv(tab: str, payload: dict = Body(default={}), user: dict = User) -
         inquiry.to_csv(result),
         media_type="text/csv",
         headers={"Content-Disposition": f'attachment; filename="pims-{tab}.csv"'},
+    )
+
+
+# ---------------------------------------------------------------- reports
+
+
+@app.post("/api/reports/{name}", tags=["reports"])
+def run_report(name: str, payload: dict = Body(default={}), user: dict = User) -> dict:
+    return reports.run(name, payload, user)
+
+
+@app.post("/api/reports/{name}/csv", tags=["reports"])
+def report_csv(name: str, payload: dict = Body(default={}), user: dict = User) -> Response:
+    result = reports.run(name, payload, user)
+    return PlainTextResponse(
+        reports.to_csv(result),
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{reports.filename(result)}"'},
     )
 
 

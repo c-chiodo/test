@@ -432,34 +432,117 @@ python -m pims department add --code ACID --name Acid --plants DM,SC
 ```
 
 **How acidulation is recorded.** Soap arrives by truck or railcar (the receive
-screen asks which, and takes the trailer or car number). An acid batch is a
-*staged* batch in a reactor, recorded as it happens:
+screen asks which, and takes the trailer or car number); it can be left on the
+truck bay or the spur and charged later. A settle is a *staged* batch in a
+settle tank, recorded as it happens, in the same shape as the legacy ledger:
 
 | Stage | On the screen | In the ledger |
 |---|---|---|
-| Soap in | from a tank, or straight off a truck/railcar | MOVE into the reactor, or RECEIVE against the PO, tagged with the batch |
-| Acid in | acid and water, amounts rescaled to the soap charged | MOVE into the reactor, tagged |
-| Cook & mix | a clock | the time, on the batch |
-| Settle | a clock | the time, on the batch |
-| Draw off | the tank, and the **measured** pounds | PRODUCE: everything charged out of the reactor, the measured pounds into the tank; the difference is acid water and loss |
+| Soap going in | from a tank, the spur, or straight off a truck | PRODUCE soap → Soap in Process (01006) in the tank; off a truck, a RECEIVE onto the truck bay first |
+| Acid going in | acid and steam, pre-filled from the recipe per 100 lbs of soap | PRODUCE acid / steam → 01006; steam comes from a Utility location that may run negative |
+| Cooking & mixing | a clock | the time, on the batch |
+| Settling | a clock | the time, on the batch |
+| Broken | each output's tank, **measured** pounds and readings | PRODUCE 01006 → 20's oil, → MGR, → process water; moisture and spintest as readings |
 
-A draw-off more than 8 points from the recipe's usual yield asks for
-confirmation. A batch with product in cannot be cancelled — draw it off, or
-undo the charges. The batch and its clock live on the server (`process_batch`),
-so a batch settling across a shift change is picked up on any terminal; the
-reactor's tile on Today and on the tank board says which stage it is at.
-Acid batches are numbered `A-#####`.
+A break that does not balance within 10% of what went in asks for
+confirmation; the page shows first-pass yield live (oil ÷ soap × TFA). A batch
+with product in cannot be cancelled — break it, or undo the charges. The batch
+and its clock live on the server (`process_batch`), so a batch settling across
+a shift change is picked up on any terminal; the tank's tile on Today and on
+the tank board says which stage it is at. Acid batches are numbered
+`A-#####`. MGR is reprocessed the same way in an MGR tank (the "MGR
+reprocess" recipe: MGR in; oil, MGR and water out).
 
-**The acid department's recipe.** The recipe's percentages are a *guide* — the
-charge shown to the operator — and its yield is what a draw-off is compared
-with. The sandbox's numbers (soapstock 90%, acid 6%, process water 4% of the
-charge, about 80% out) are **placeholders**: nobody has given us the real ones.
-Set them before using it:
+**The recipes.** The seeded ones are from the Des Moines yields workbook:
+acid 5.1 and steam 2.6 lbs per 100 lbs of soap, TFA 26%, expected FPY 55%
+(MGR reprocess 34%). Adjust them to each plant's practice with
+`PUT /api/blend/recipes/{material_id}` (`method: "staged"`,
+`process_material_id`, `expected_tfa`, `yield_pct`, `vessel_type`, the
+components with the soap group, and the outputs). The CLI sets the simpler
+parts:
 
 ```sh
-python -m pims department recipe --code ACID --product 02001 \
-  --component 02005=90 --component 00001=6 --component 00010=4 \
-  --yield 80 --vessel Acid --staged
+python -m pims department recipe --code ACID --product 01019 \
+  --component 00007=100 --component 00001=5.1 --component 00004=2.6 \
+  --yield 55 --vessel Settle --staged
 ```
 
-The reactor is an ordinary location whose type is `Acid`; add one per reactor.
+A settle tank is an ordinary location whose type is `Settle`; an MGR tank's is
+`MGR`. Add one per tank.
+
+## 21. Blended loads, caustic to the pH
+
+A product with a blend recipe (FE Cattle Blend 2.5/3.5, MGR veg 2.5, HC3800
+XL) is not loaded from one tank: **Load & ship** shows each component with its
+tank and pounds, scaled to the truck, and the caustic as steps — add some,
+type the pH, add more. Nothing is posted until **Save load**; then the truck
+posts as PROD_LOAD rows (one per component, the legacy PROD-LOAD) under one
+BOL, one staged shipment, the dosing steps in the caustic row's remarks and
+the last pH as a reading that pre-fills the QC form.
+
+- The target range is the product's pH limit (Products & limits); a last
+  reading outside it asks *add more, or load it as it is* — a warning, not a
+  wall, and the record keeps the reading. It is asked before the over-the-order
+  question, because it is the one the operator can still fix.
+- A wrong truck is voided whole from the order's transactions, as any load.
+- Why: in the legacy PIMS each caustic step was a posting, so a load that
+  overshot was reversed and re-posted — 13.6% of PROD-LOAD rows June–August
+  2026, 31% of the caustic posted to FE Cattle Blend 2.5 at Sioux City.
+  **Reports → Reversals** shows whether that rate falls.
+
+## 22. Reports
+
+**Reports** (Analysis) computes the spreadsheets from the ledger. Each report
+has its definitions on the page, and **Download CSV** gives its main table.
+
+| Tab | Replaces | What it shows |
+|---|---|---|
+| Acid yields | DM_Yields (Summary) | Soap received and processed, acid % and steam, reprocessed water, settle and MGR break splits, 20's oil and bottoms, oil final, FPY / SPY / OY, outbound MGRV / MGRA / water / caustic, water trailers, and the 7-day series |
+| Caustic per load | "Caustic used in MGR and PH", Caustic Usage, Load Caustic Detail | One row per order: gross, reversed and net caustic, the pH (0 = not tested, never averaged), status; by plant, product and month |
+| Reversals | the reversal counts in the operations workbook | Postings undone, by plant and type, week by week, and what gets reversed most |
+| Spreadsheet exports | the PIMS QUERY / PIMS Report exports | The ledger in the legacy column layouts (see below) |
+
+**Definitions.** The materials are identified by their legacy numbers, as the
+workbooks filter them: soap 6, 7, 10; acid 1; steam 4; water 11 and 1008;
+Soap in Process 1006; MGR veg 1007; MGR animal 1003; 20's oil 1018 and 1019;
+caustic 3. A site that numbers differently overrides them with the
+`reports.materials` setting, e.g.
+`{"soap": [6, 7, 10], "oil": [1019]}` (only the roles given change). Two
+deliberate differences from the workbook:
+
+- Rows are classified by material, not tank number. "Settle oil" is oil made
+  from Soap in Process, "MGRV oil" is oil made from MGR — the same thing as
+  tanks 1–10 and 13–17 at Des Moines, and still true at a plant numbered
+  differently. MGR going *into* an MGR tank is processing; MGR coming *out* to
+  another tank is break output.
+- A reversed posting and its reversal are left out of the yields (the order
+  screens do the same). The caustic and reversal reports show them.
+
+Days are the operator's business date (`user_date`); TFA defaults to the
+workbook's 26% and can be changed on the page.
+
+**Keeping the existing workbooks working while they are retired.** On
+*Spreadsheet exports* choose the layout, the dates and the plants, download,
+and paste over the export sheet:
+
+| Layout | Paste over | Columns |
+|---|---|---|
+| DM Yields | "PIMS QUERY Export …" in DM_Yields | 28, Transaction_Date as a date |
+| Operations workbook | "PIMS QUERY Export …" in the operations workbook | 30 |
+| Caustic, MGR & pH | "PIMS Report Export …" | 24, with REVERSAL rows and their Parent |
+
+From_Qty is negative and To_Qty positive, as the legacy export; a reversal is
+its parent's row with the signs turned round (`PROD-LOAD - REVERSAL` in the
+query layouts, `REVERSAL` with the parent id in the report layout). Location
+numbers lose the plant prefix (`DM-103` → `103`). The workbooks' sub-sheets
+(Received Soap, Oil_FP, …) are filters of the export and refill as before.
+
+**Checking a report against the workbook.** Run *Acid yields* for the
+workbook's Start–End dates and plant, and compare with the Summary sheet. A
+difference is almost always one of the two above: a tank number the workbook
+filters on that is not the material it assumes, or a reversed pair the
+workbook nets and this report leaves out. `POST /api/reports/{name}` returns
+the JSON for scripted checks.
+
+**Power BI.** The reports read the same tables Power BI would; see
+[PIMS.md](PIMS.md#reports) for what a Power BI model needs access to.

@@ -415,6 +415,7 @@ def seed_all(conn: sqlite3.Connection | None = None) -> None:
         _seed_activity(conn, rng, material_ids, location_ids, user_ids)
         _seed_acid(conn, material_ids, user_ids)
         _seed_deliveries(conn, material_ids)
+        _seed_history(conn, material_ids, user_ids)
 
 
 def _seed_recipes(conn, material_ids: dict[str, int]) -> None:
@@ -1395,4 +1396,296 @@ def _seed_deliveries(conn, material_ids: dict[str, int]) -> None:
                     "added_by": "jmartin",
                 },
                 conn,
+            )
+
+
+def _seed_history(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> None:
+    """Six weeks of the acid department and its blended loads, for the reports.
+
+    Des Moines settles most days and reprocesses MGR weekly; Sioux City
+    settles every other day. The oil goes out as AV4000, the MGR and water as
+    FE Cattle Blend with caustic dosed to the pH, the rest of the water by the
+    trailer. Early loads have the legacy habit of posting the caustic, finding
+    the pH wrong and reversing it; the last ten days were dosed on the screen.
+
+    Every tank is tracked as rows are written, so nothing leaves a tank that
+    does not hold it and the balances the demo opened with are what it keeps.
+    Its own random stream, so the rest of the demo ledger is unchanged.
+    """
+
+    rng = random.Random(8801)
+    acid_id = next(did for did, code, _d in DEPARTMENTS if code == "ACID")
+    now = utc_now().replace(minute=0, second=0, microsecond=0)
+    order_id = int(db.scalar('SELECT MAX(order_id) FROM "order"', (), conn) or 0)
+    users = [user_ids["toperator"], user_ids["toperator"], user_ids["rprice"]]
+    level: dict[tuple[int, int], float] = {}
+
+    def loc(plant_id: int, number: str) -> int | None:
+        return db.scalar("SELECT location_id FROM location WHERE plant_id = ? AND number = ?", (plant_id, number), conn)
+
+    def on_hand(location_id: int, material: str) -> float:
+        key = (location_id, material_ids[material])
+        if key not in level:
+            level[key] = float(db.scalar(
+                """SELECT COALESCE(SUM(CASE WHEN to_location_id = :l AND to_material_id = :m THEN to_qty ELSE 0 END), 0)
+                        - COALESCE(SUM(CASE WHEN from_location_id = :l AND from_material_id = :m THEN from_qty ELSE 0 END), 0)
+                   FROM inventory_transaction""",
+                {"l": location_id, "m": material_ids[material]}, conn,
+            ) or 0.0)
+        return level[key]
+
+    def txn(row: dict, at) -> int:
+        stamp = at.isoformat()
+        row = {"department_id": acid_id, "user_id": rng.choice(users), "transaction_date": stamp,
+               "user_date": stamp[:10], "remarks": "", **row}
+        if row.get("from_location_id") and row.get("from_material_id"):
+            key = (row["from_location_id"], row["from_material_id"])
+            level[key] = level.get(key, 0.0) - row["from_qty"]
+        if row.get("to_location_id") and row.get("to_material_id"):
+            key = (row["to_location_id"], row["to_material_id"])
+            level[key] = level.get(key, 0.0) + row["to_qty"]
+        return db.insert("inventory_transaction", row, conn)
+
+    def reverse(txn_id: int, at, reason: str) -> None:
+        o = db.query_one("SELECT * FROM inventory_transaction WHERE transaction_id = ?", (txn_id,), conn)
+        txn({"transaction_type_id": o["transaction_type_id"], "parent_transaction_id": txn_id, "order_id": o["order_id"],
+             "plant_id": o["plant_id"], "department_id": o["department_id"], "user_id": o["user_id"],
+             "from_material_id": o["to_material_id"], "from_location_id": o["to_location_id"], "from_qty": o["to_qty"],
+             "to_material_id": o["from_material_id"], "to_location_id": o["from_location_id"], "to_qty": o["from_qty"],
+             "trailer_number": o["trailer_number"], "is_reversal": 1,
+             "remarks": f"Reversal of transaction {txn_id}: {reason}"}, at)
+        db.update("inventory_transaction", {"transaction_id": txn_id}, {"voided": 1}, conn)
+
+    def order(plant_id: int, kind: int, product: str, qty: float, at, reference: str, department_id=acid_id) -> int:
+        nonlocal order_id
+        order_id += 1
+        db.insert("order", {
+            "order_id": order_id, "order_type_id": kind, "order_date": at.date().isoformat(),
+            "due_date": at.date().isoformat(), "order_reference": reference, "company_id": 1,
+            "plant_id": plant_id, "department_id": department_id, "blend_serial_number": "",
+            "vendor_id": rng.randrange(1, len(VENDORS) + 1) if kind == 3 else None,
+            "customer_id": rng.randrange(1, len(CUSTOMERS) + 1) if kind == 1 else None,
+            "material_one_id": material_ids[product], "material_one_quantity": qty,
+            "ship_method": "Bulk trailer" if kind == 1 else "", "trailer_number": "", "comments": "",
+            "status_id": 4, "date_added": at.isoformat(), "added_by": "jmartin",
+        }, conn)
+        return order_id
+
+    def ship(plant_id: int, so: int, first_txn: int, product: str, lbs: float, trailer: str, at) -> None:
+        db.insert("pending_shipment", {"order_id": so, "transaction_id": first_txn, "trailer_number": trailer,
+                                       "quantity": lbs, "shipped": 1}, conn)
+        txn({"transaction_type_id": 5, "parent_transaction_id": first_txn, "order_id": so, "plant_id": plant_id,
+             "from_material_id": material_ids[product], "from_location_id": loc(plant_id, f"{code}-TRAILER"),
+             "from_qty": lbs, "trailer_number": trailer, "remarks": "Shipped"}, at + timedelta(hours=1))
+
+    def qc(so: int, bol: str, at, ph: float | None, moisture: float | None = None) -> None:
+        db.insert("qc", {"order_id": so, "bol_number": bol, "test_date": at.isoformat(), "performed_by": "rprice",
+                         "moisture": moisture, "ph": ph, "sample_number": f"{code}C{rng.randrange(1000, 9999)}D{at:%y%m%d}",
+                         "seal_number": str(rng.randrange(100_000, 999_999)),
+                         "date_added": at.isoformat(), "added_by": "rprice"}, conn)
+
+    cattle_dept = db.scalar(
+        "SELECT mt.department_id FROM material m JOIN material_type mt ON mt.material_type_id = m.material_type_id"
+        " WHERE m.material_id = ?", (material_ids["01021"],), conn,
+    )
+
+    for plant_id, code, _name in PLANTS:
+        if code not in PLANT_DEPARTMENTS["ACID"]:
+            continue
+        dm = code == "DM"
+        oil = "01019" if dm else "01018"
+        settles = [loc(plant_id, f"{code}-{n}") for n in (("2", "3") if dm else ("1", "2"))]
+        oil_tanks = [loc(plant_id, f"{code}-{n}") for n in (("20", "21") if dm else ("20",))]
+        water_tanks = [loc(plant_id, f"{code}-{n}") for n in (("32", "33") if dm else ("32",))]
+        mgr_out, mgr_back = loc(plant_id, f"{code}-41"), loc(plant_id, f"{code}-42")
+        reactor = loc(plant_id, f"{code}-13")
+        acid_tank, steam = loc(plant_id, f"{code}-103"), loc(plant_id, f"{code}-975")
+        truck, trailer_loc = loc(plant_id, f"{code}-RECV-TRUCK"), loc(plant_id, f"{code}-TRAILER")
+        caustic_tank = db.scalar(
+            """SELECT l.location_id FROM location l JOIN inventory_transaction t ON t.to_location_id = l.location_id
+               WHERE l.plant_id = ? AND t.to_material_id = ? AND l.location_type_id = 1
+               GROUP BY l.location_id ORDER BY SUM(t.to_qty) DESC LIMIT 1""",
+            (plant_id, material_ids["00003"]), conn,
+        )
+        mgr_store = db.scalar(
+            """SELECT l.location_id FROM location l JOIN inventory_transaction t ON t.to_location_id = l.location_id
+               WHERE l.plant_id = ? AND t.to_material_id = ? AND l.location_type_id = 1 AND l.number LIKE ?
+               GROUP BY l.location_id ORDER BY SUM(t.to_qty) DESC LIMIT 1""",
+            (plant_id, material_ids["01007"], f"{code}-T%"), conn,
+        ) or mgr_back
+        floor = {key: on_hand(*key) for key in
+                 [(t, oil) for t in oil_tanks] + [(t, "01008") for t in water_tanks] + [(mgr_out, "01007")]}
+        week_orders: dict[int, tuple[int, int]] = {}
+        acid_this_week = 0.0
+
+        def over(tank: int, material: str) -> float:
+            return on_hand(tank, material) - floor[(tank, material)]
+
+        for days_ago in range(42, 1, -1):
+            day = now - timedelta(days=days_ago)
+            week = days_ago // 7
+            if week not in week_orders:
+                start = day.replace(hour=6)
+                week_orders[week] = (
+                    order(plant_id, 2, oil, 0.0, start, f"SETTLE-{code}-W{day:%V}"),
+                    order(plant_id, 3, "00007", 0.0, start, f"P01-0{rng.randrange(21_000, 21_999)}-{rng.randrange(1, 90)}"),
+                )
+                if acid_this_week:
+                    ro = order(plant_id, 3, "00001", acid_this_week, start, f"P01-0{rng.randrange(21_000, 21_999)}-1")
+                    txn({"transaction_type_id": 1, "order_id": ro, "plant_id": plant_id, "to_location_id": acid_tank,
+                         "to_material_id": material_ids["00001"], "to_qty": round(acid_this_week), "remarks": "Acid delivery"},
+                        start)
+                    acid_this_week = 0.0
+            wo, po = week_orders[week]
+            settle_today = (rng.random() < 0.86) if dm else (days_ago % 2 == 0)
+            if settle_today:
+                tank = settles[days_ago % len(settles)]
+                t0 = day.replace(hour=rng.choice((5, 6, 7, 8)))
+                soap_mat = rng.choice(("00007", "00007", "00010", "00006"))
+                soap = round(rng.uniform(38_000, 48_000), -1)
+                truck_no = str(rng.randrange(100, 999))
+                txn({"transaction_type_id": 1, "order_id": po, "plant_id": plant_id, "to_location_id": truck,
+                     "to_material_id": material_ids[soap_mat], "to_qty": soap, "trailer_number": truck_no,
+                     "to_bol": f"P01-0{rng.randrange(21_000, 21_999)}({truck_no})"}, t0)
+                inputs = [(soap_mat, truck, soap, 5)]
+                acid = round(soap * rng.uniform(0.045, 0.058))
+                acid_this_week += acid
+                inputs.append(("00001", acid_tank, acid, 50))
+                inputs.append(("00004", steam, round(soap * rng.uniform(0.02, 0.034)), 55))
+                if rng.random() < 0.5 and on_hand(water_tanks[0], "01008") > 12_000:
+                    inputs.append(("01008", water_tanks[0], round(rng.uniform(3_000, 7_000)), 20))
+                for material, source, lbs, minutes in inputs:
+                    txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": source,
+                         "from_material_id": material_ids[material], "from_qty": lbs, "to_location_id": tank,
+                         "to_material_id": material_ids["01006"], "to_qty": lbs, "remarks": "Charged to settle"},
+                        t0 + timedelta(minutes=minutes))
+                total_in = sum(i[2] for i in inputs)
+                fpy = min(max(rng.gauss(0.55, 0.05), 0.42), 0.66)
+                oil_lbs = round(soap * 0.26 * fpy)
+                mgr_lbs = round(total_in * rng.uniform(0.21, 0.28))
+                t1 = t0 + timedelta(hours=rng.choice((9, 10, 11)))
+                oil_tank = min(oil_tanks, key=lambda t: on_hand(t, oil))
+                water_tank = min(water_tanks, key=lambda t: on_hand(t, "01008"))
+                moisture, spin = round(rng.uniform(1.4, 3.4), 2), rng.choice((0.1, 0.2, 0.2, 0.3))
+                for material, dest, lbs, remarks in ((oil, oil_tank, oil_lbs, f"M={moisture} S={spin}"),
+                                                     ("01007", mgr_out, mgr_lbs, f"M={round(rng.uniform(3, 8), 2)} S=0.3"),
+                                                     ("01008", water_tank, total_in - oil_lbs - mgr_lbs, "")):
+                    tid = txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": tank,
+                               "from_material_id": material_ids["01006"], "from_qty": lbs, "to_location_id": dest,
+                               "to_material_id": material_ids[material], "to_qty": lbs, "remarks": remarks}, t1)
+                    if material == oil:
+                        db.insert("txn_reading", {"transaction_id": tid, "analyte": "moisture", "value": moisture,
+                                                  "source": "remark"}, conn)
+                        db.insert("txn_reading", {"transaction_id": tid, "analyte": "spintest", "value": spin,
+                                                  "source": "remark"}, conn)
+
+            # Every few days the MGR is reprocessed; weekly the 20's bottoms go back to it.
+            t0 = day.replace(hour=13)
+            if days_ago % (3 if dm else 6) == 0 and reactor:
+                # What the settles and bottoms added since, not the tank's opening stock.
+                batch = round(min(over(mgr_out, "01007"), rng.uniform(32_000, 40_000)), -1)
+                if batch > 10_000:
+                    txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": mgr_out,
+                         "from_material_id": material_ids["01007"], "from_qty": batch, "to_location_id": reactor,
+                         "to_material_id": material_ids["01007"], "to_qty": batch, "remarks": "MGR to reprocess"}, t0)
+                    oil_lbs = round(batch * rng.uniform(0.30, 0.38))
+                    back = round(batch * rng.uniform(0.25, 0.35))
+                    for material, dest, lbs in ((oil, oil_tanks[-1], oil_lbs), ("01007", mgr_back, back),
+                                                ("01008", water_tanks[-1], batch - oil_lbs - back)):
+                        txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": reactor,
+                             "from_material_id": material_ids["01007"], "from_qty": lbs, "to_location_id": dest,
+                             "to_material_id": material_ids[material], "to_qty": lbs, "remarks": "MGR break"},
+                            t0 + timedelta(hours=8))
+            if days_ago % 7 == 3:
+                bottoms = round(rng.uniform(7_000, 12_000) * (1 if dm else 0.5))
+                if on_hand(oil_tanks[0], oil) > bottoms + 10_000:
+                    txn({"transaction_type_id": 2, "order_id": wo, "plant_id": plant_id, "from_location_id": oil_tanks[0],
+                         "from_material_id": material_ids[oil], "from_qty": bottoms, "to_location_id": mgr_out,
+                         "to_material_id": material_ids["01007"], "to_qty": bottoms, "remarks": "20's bottoms"},
+                        t0 + timedelta(hours=9))
+
+            # What the day made goes out the gate once there is a truckload.
+            t_out = day.replace(hour=20)
+            for tank in oil_tanks:
+                while over(tank, oil) >= 45_000:
+                    lbs = round(rng.uniform(44_000, 45_500))
+                    trailer = str(rng.randrange(100, 999))
+                    so = order(plant_id, 1, "05065", lbs, t_out, f"O01-1{rng.randrange(10_000, 19_999)}-1", None)
+                    bol = f"001-{rng.randrange(111_000, 118_999)}-1({trailer})"
+                    first = txn({"transaction_type_id": 8, "order_id": so, "plant_id": plant_id, "from_location_id": tank,
+                                 "from_material_id": material_ids[oil], "from_qty": lbs, "to_location_id": trailer_loc,
+                                 "to_material_id": material_ids["05065"], "to_qty": lbs, "to_bol": bol,
+                                 "trailer_number": trailer, "department_id": None}, t_out)
+                    qc(so, bol, t_out, None, round(rng.uniform(1.1, 1.6), 2))
+                    ship(plant_id, so, first, "05065", lbs, trailer, t_out)
+            # A cattle blend most days: MGR off the break if there is a load of
+            # it, otherwise from storage (topped up by the inbound MGR trucks).
+            for _load in range(1 if rng.random() < (0.85 if dm else 0.5) else 0):
+                if not caustic_tank:
+                    break
+                product = rng.choice(("01021", "01021", "01020"))
+                total = round(rng.uniform(44_000, 46_500))
+                mgr_share, caustic_share = (0.542, 0.047) if product == "01021" else (0.57, 0.025)
+                mgr_lbs, caustic_lbs = round(total * mgr_share), round(total * caustic_share * rng.uniform(0.85, 1.15))
+                water_tank = max(water_tanks, key=lambda t: on_hand(t, "01008"))
+                water_lbs = total - mgr_lbs - caustic_lbs
+                if on_hand(water_tank, "01008") < water_lbs + 2_000:
+                    break
+                mgr_from = mgr_back if on_hand(mgr_back, "01007") >= mgr_lbs + 2_000 else mgr_store
+                if on_hand(mgr_from, "01007") < mgr_lbs + 20_000:
+                    lbs = round(rng.uniform(44_000, 46_000))
+                    po_mgr = order(plant_id, 3, "01007", lbs, t_out, f"P01-0{rng.randrange(21_000, 21_999)}-{rng.randrange(1, 90)}", None)
+                    txn({"transaction_type_id": 1, "order_id": po_mgr, "plant_id": plant_id, "to_location_id": mgr_from,
+                         "to_material_id": material_ids["01007"], "to_qty": lbs, "department_id": None,
+                         "trailer_number": str(rng.randrange(100, 999))}, t_out - timedelta(hours=4))
+                trailer = str(rng.randrange(100, 999))
+                so = order(plant_id, 1, product, total, t_out, f"O01-1{rng.randrange(10_000, 19_999)}-1", cattle_dept)
+                bol = f"001-{rng.randrange(111_000, 118_999)}-1({trailer})"
+                base = {"transaction_type_id": 8, "order_id": so, "plant_id": plant_id, "to_location_id": trailer_loc,
+                        "to_material_id": material_ids[product], "to_bol": bol, "trailer_number": trailer,
+                        "department_id": cattle_dept}
+                first = txn({**base, "from_location_id": mgr_from, "from_material_id": material_ids["01007"],
+                             "from_qty": mgr_lbs, "to_qty": mgr_lbs}, t_out)
+                txn({**base, "from_location_id": water_tank, "from_material_id": material_ids["01008"],
+                     "from_qty": water_lbs, "to_qty": water_lbs}, t_out + timedelta(minutes=10))
+                dosed_here = days_ago <= 10
+                ph = round(min(max(rng.gauss(3.2, 0.5 if dosed_here else 0.8), 1.6), 6.2), 2)
+                if not dosed_here and rng.random() < (0.35 if not dm else 0.18):
+                    # Posted, tested, wrong: reversed and posted again.
+                    wrong = round(caustic_lbs * rng.uniform(0.5, 0.9))
+                    bad = txn({**base, "from_location_id": caustic_tank, "from_material_id": material_ids["00003"],
+                               "from_qty": wrong, "to_qty": wrong}, t_out + timedelta(minutes=20))
+                    reverse(bad, t_out + timedelta(minutes=40), "pH high, re-dosing")
+                cid = txn({**base, "from_location_id": caustic_tank, "from_material_id": material_ids["00003"],
+                           "from_qty": caustic_lbs, "to_qty": caustic_lbs,
+                           "remarks": f"Dosed to ph: +{caustic_lbs:,} lbs -> ph {ph}" if dosed_here else ""},
+                          t_out + timedelta(minutes=50))
+                if dosed_here:
+                    db.insert("txn_reading", {"transaction_id": cid, "analyte": "ph", "value": ph, "source": "entered"}, conn)
+                # About one load in six went out untested.
+                qc(so, bol, t_out + timedelta(minutes=55), ph if dosed_here or rng.random() > 0.17 else None)
+                ship(plant_id, so, first, product, total, trailer, t_out)
+            for tank in water_tanks:
+                while over(tank, "01008") >= 46_000:
+                    lbs = round(rng.uniform(45_500, 46_700))
+                    trailer = str(rng.randrange(100, 999))
+                    so = order(plant_id, 1, "01008", lbs, t_out, f"O01-1{rng.randrange(10_000, 19_999)}-1")
+                    bol = f"001-{rng.randrange(111_000, 118_999)}-1({trailer})"
+                    first = txn({"transaction_type_id": 4, "order_id": so, "plant_id": plant_id, "from_location_id": tank,
+                                 "from_material_id": material_ids["01008"], "from_qty": lbs, "to_location_id": trailer_loc,
+                                 "to_material_id": material_ids["01008"], "to_qty": lbs, "to_bol": bol,
+                                 "trailer_number": trailer}, t_out + timedelta(hours=1))
+                    ship(plant_id, so, first, "01008", lbs, trailer, t_out + timedelta(hours=1))
+
+        # The week's work orders and receipts carry what they did.
+        for wo, po in week_orders.values():
+            db.execute(
+                'UPDATE "order" SET material_one_quantity = COALESCE((SELECT SUM(to_qty) FROM inventory_transaction'
+                " WHERE order_id = ? AND to_material_id = ? AND voided = 0 AND is_reversal = 0), 0) WHERE order_id = ?",
+                (wo, material_ids[oil], wo), conn,
+            )
+            db.execute(
+                'UPDATE "order" SET material_one_quantity = COALESCE((SELECT SUM(to_qty) FROM inventory_transaction'
+                " WHERE order_id = ?), 0) WHERE order_id = ?",
+                (po, po), conn,
             )

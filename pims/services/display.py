@@ -118,6 +118,7 @@ def tanks(plant_id: int, conn=None, department_id: int | None = None) -> dict[st
                 "state": _state(total, capacity),
                 "products": [
                     {
+                        "material_id": r["material_id"],
                         "number": r["material_number"],
                         "description": r["material_description"],
                         "lbs": r["balance"],

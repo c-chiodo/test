@@ -133,6 +133,7 @@ Three invariants are enforced in `post()` rather than left to the screens:
 | Produce | **Plant floor → Made product without a recipe** | Work order, tank in, tank out, pounds in and out; hours under More details |
 | Move | **Plant floor → Product moved to another tank** | Tank tiles; the product fills itself in |
 | Load Trailer | **Load & ship** | Stages a pending shipment |
+| Load Trailer as PROD-LOAD (blended on the trailer) | **Load & ship** → *Blend onto the trailer* | Each component from its tank, caustic dosed in steps against the pH on the screen; the whole truck posts once — no post-and-reverse |
 | Ship Trailer | **Plant floor → Ship trailer** | Staged list, BOL preview, print |
 | Shrinkage | **Plant floor → Product lost or written off** | Tank, pounds, a reason chip |
 | Quality Control → Regular QC | Order detail → **Quality control** | Product-driven validation; spec flagging |
@@ -143,6 +144,7 @@ Three invariants are enforced in `post()` rather than left to the screens:
 | Add Matrix Results | Custom query → Add matrix results | Reportable current components only; misses reported explicitly |
 | Matrix viewer (single sample) | `GET /api/lims/sample/{code}` | API only for now — see "Not built" |
 | Reports (ReportViewer / RDLC) | BOL view + CSV export | See "Not built" |
+| The plants' spreadsheets (DM Yields; Caustic in MGR and pH; the operations workbook) | **Reports** | Acid yields, caustic per load, reversal rate — computed from the ledger with the workbooks' definitions — and exports in the legacy column layouts so the workbooks keep working meanwhile |
 | Change Plant | Plant switcher in the top bar | |
 | "You are in the TEST environment" | Environment badge in the top bar | |
 | Customers / Materials / Requirements | **Products & limits**, requirements shown on the order | Master data still originates in Great Plains |
@@ -279,14 +281,69 @@ anyone blends to them.
 - Voiding is per batch, never per component: half a blend is not a state a
   tank can be in.
 
+### Blending onto the trailer
+
+Most loads are blended on the trailer, not pumped from one tank: FE Cattle
+Blend is MGR veg, process water and caustic, each from its own tank. The
+legacy PIMS records these as PROD-LOAD rows and the caustic, which goes in
+against the pH, as one posting per attempt — so a load that overshot was
+reversed and re-posted (13.6% of PROD-LOAD rows in June–August 2026).
+**Load & ship** keeps the attempts on the screen — add caustic, type the pH,
+add more — and posts the truck once: one PROD_LOAD row per component, one
+BOL, one staged shipment, the dosing log in the remarks, and the last pH as a
+reading the QC form starts from (`pims/services/loadblend.py`).
+
+### Reports
+
+The plants run their reporting from spreadsheets built on PIMS exports — DM
+Yields (a dozen sheets of SUMIFS by material and tank number), the caustic
+and pH workbook, and the operations overview. **Reports** computes the same
+numbers from the ledger (`pims/services/reports.py`), for any plant and any
+dates, with each definition written on the page:
+
+- **Acid yields** — soap received and processed, acid per pound of soap,
+  steam, reprocessed water; how each settle and MGR break split; 20's oil,
+  bottoms and oil final; first-pass, second-pass and overall yield; what went
+  out blended onto trailers and as water trailers; and the 7-day series.
+- **Caustic per load** — per order: gross, reversed and net caustic, the pH
+  (a legacy 0 is "not tested" and is never averaged), by plant, product and
+  month.
+- **Reversals** — how often a posting is undone, by plant and type, week by
+  week: the measure of whether the new screens stop post-and-reverse.
+- **Spreadsheet exports** — the ledger in the three legacy column layouts,
+  so the existing workbooks keep working while they are retired.
+
+Materials are identified by their legacy numbers, which is what the workbooks
+filter on and what a mirrored legacy ledger carries, so the reports read the
+same in standalone and companion mode. Rows are classified by material, not
+tank number, and reversed pairs are left out of yields; both are explained in
+[PIMS_RUNBOOK.md §22](PIMS_RUNBOOK.md#22-reports).
+
+**Power BI.** A Power BI model of the same data needs read access to:
+
+| Database | Tables | For |
+|---|---|---|
+| `ProductionData` | `dbo.[transaction]` and `dbo.[Transaction_Archive]` (the ledger, older rows archived) | every quantity |
+| `ProductionData` | `dbo.[TransType]`, `dbo.[Material]`, `dbo.[MaterialType]`, `dbo.[Location]`, `dbo.[LocationType]`, `dbo.[Plant]`, `dbo.[Department]`, `dbo.[Order]`, `dbo.[OrderType]`, `dbo.[Status]`, `dbo.[Vendor]`, `dbo.[Customer]` | names, types and the order behind each row |
+| `ProductionData` | `dbo.[QC]`, `dbo.[PendingShipments]` | pH, moisture, seal, and what was staged or shipped |
+| `FECoreData` | `dbo.[User]` | who posted (the export's User_Name) |
+| LabWare LIMS (optional) | the result tables behind the matrix | lab results beyond the QC row |
+
+The traps are the ones this code handles: From_Qty is stored negative;
+a reversal is a row of type REVERSAL whose parent is the row it undoes (net
+them, or exclude both); readings typed into Remarks as `M=… S=…` are not in
+QC; a QC pH of 0 means not tested; and tank numbers mean different things at
+different plants. A read-only login is enough — the companion's
+`PIMS_COMPANION.md` covers setting one up.
+
 ## What is not built
 
 Stated plainly, because a replacement that quietly drops features is worse than
 one with a known gap list:
 
-- **RDLC report rendering.** The BOL is reproduced as a printable view and
-  every grid exports to CSV, but the other ReportViewer reports have not been
-  ported. Porting them needs the `.rdlc` files, which were not in the material
+- **RDLC report rendering.** The BOL is reproduced as a printable view,
+  every grid exports to CSV, and the plants' spreadsheets are **Reports**,
+  but the other ReportViewer reports have not been ported. Porting them needs the `.rdlc` files, which were not in the material
   provided.
 - **Great Plains synchronisation.** Customers, vendors and orders sync from GP
   through `GP_Job_Sync_*` procedures today. The replacement models the data and

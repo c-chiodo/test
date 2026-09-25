@@ -18,6 +18,7 @@ import {
   nextBol, nextSampleNumber, prefillOperation, prefillQc, recordJobRun, recordScaleReading,
   resolveScan, runAlerts, setting, simulateScaleReading, trailerHistory,
 } from './automation'
+import { reportTable, runReport } from './reports'
 
 /* ----------------------------------------------------------------- errors */
 
@@ -1447,7 +1448,7 @@ export function tankBoard(plantId: number, departmentId: number | null = null): 
         percent_full: capacity ? Math.round((total / capacity) * 1000) / 10 : null,
         room: capacity ? Math.round((capacity - total) * 100) / 100 : null,
         state: tankState(total, capacity),
-        products: held.map((r: Row) => ({ number: r.material_number, description: r.material_description, lbs: r.balance })),
+        products: held.map((r: Row) => ({ material_id: r.material_id, number: r.material_number, description: r.material_description, lbs: r.balance })),
         mixed: held.filter((r: Row) => r.balance > 0.5).length > 1,
         last_moved: lastMoved.get(l.location_id) ?? null,
       }
@@ -3250,6 +3251,7 @@ const COMPANION_ALLOWED_WRITES = [
   /^\/api\/lims\/(matrix|ingest)$/,
   /^\/api\/inquiry\/[^/]+(\/csv)?$/,
   /^\/api\/query\/run(\/csv)?$/,
+  /^\/api\/reports\/[^/]+(\/csv)?$/,
   /^\/api\/query\/saved(\/\d+)?$/,
   /^\/api\/alerts\/(run|\d+\/acknowledge)$/,
   /^\/api\/jobs\/[^/]+\/run$/,
@@ -3704,6 +3706,13 @@ async function route(method: string, path: string, body: Row): Promise<any> {
   if ((m = match(path, '/api/inquiry/:tab/csv')) && method === 'POST') {
     const result = inquiry(m[0], body)
     return toCsv(result.rows, result.columns.map((c: Row) => c.name))
+  }
+
+  // reports
+  if ((m = match(path, '/api/reports/:name')) && method === 'POST') return runReport(m[0], body, requireUser())
+  if ((m = match(path, '/api/reports/:name/csv')) && method === 'POST') {
+    const table = reportTable(runReport(m[0], body, requireUser()))
+    return toCsv(table.rows, table.columns)
   }
 
   // custom query

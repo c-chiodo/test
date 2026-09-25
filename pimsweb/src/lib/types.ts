@@ -259,7 +259,7 @@ export interface TankTile {
   room: number | null
   /** normal | warn | high | over | low | empty | negative — colour means abnormal only. */
   state: string
-  products: { number: string; description: string; lbs: number }[]
+  products: { material_id?: number; number: string; description: string; lbs: number }[]
   mixed: boolean
   last_moved: string | null
   /** A reactor mid-batch: which stage, and for how long. */

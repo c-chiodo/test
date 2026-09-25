@@ -974,3 +974,31 @@ body.kiosk button.big { font-size: 19px; }
 .dose-steps { margin: 10px 0; padding-left: 22px; display: flex; flex-direction: column; gap: 8px; }
 .dose-steps li { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .dose-steps input { width: 110px; }
+
+/* reports */
+.report-filters { grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); align-items: end; }
+.quick-ranges { display: flex; gap: 6px; flex-wrap: wrap; padding-bottom: 4px; }
+table.kv { width: 100%; border-collapse: collapse; }
+table.kv td { padding: 6px 0; border-bottom: 1px solid var(--border); }
+table.kv tr:last-child td { border-bottom: 0; }
+table.kv td.num { text-align: right; padding-left: 12px; white-space: nowrap; }
+.split-bar { display: flex; height: 14px; border-radius: 7px; overflow: hidden; background: var(--border); margin-bottom: 10px; }
+.split-bar .seg { display: block; height: 100%; }
+.seg.oil, .dot.oil, .dot.fpy { background: #c98a12; }
+.seg.mgr, .dot.mgr { background: #7a5b3a; }
+.seg.water, .dot.water, .dot.oy { background: var(--info); }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 7px; vertical-align: 0; }
+.legend { font-size: 12.5px; color: var(--text-2); display: inline-flex; gap: 4px; align-items: center; }
+.legend .dot + .dot, .legend .dot:not(:first-child) { margin-left: 10px; }
+.line-chart { width: 100%; height: auto; max-height: 190px; display: block; margin-bottom: 12px; }
+.line-chart .grid-line { stroke: var(--border); stroke-width: 1; }
+.line-chart .axis { fill: var(--text-3); font-size: 11px; }
+.line-chart .series { fill: none; stroke-width: 2.2; stroke-linejoin: round; stroke-linecap: round; }
+.line-chart .series.fpy { stroke: #c98a12; }
+.line-chart .series.oy { stroke: var(--info); }
+details.definitions { margin: 4px 0 24px; font-size: 13px; }
+details.definitions summary { cursor: pointer; color: var(--text-2); padding: 6px 0; }
+details.definitions dl { display: grid; gap: 8px; margin: 8px 0 0; }
+details.definitions dt { font-weight: 600; }
+details.definitions dd { margin: 2px 0 0; color: var(--text-2); }
+@media (max-width: 900px) { .grid.cols-3 { grid-template-columns: minmax(0, 1fr); } }
