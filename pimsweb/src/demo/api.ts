@@ -1339,7 +1339,7 @@ function companionPermissions(permissions: string[]): string[] {
 
 /* ----------------------------------------------------------- tank board */
 
-const TANK_TYPES = new Set(['Tank', 'Blend'])
+const TANK_TYPES = new Set(['Tank', 'Blend', 'Acid'])
 
 function tankState(total: number, capacity: number | null): string {
   if (total < -0.5) return 'negative'
@@ -1353,8 +1353,51 @@ function tankState(total: number, capacity: number | null): string {
   return 'normal'
 }
 
+/* ----------------------------------------------------------- departments */
+
+/** pims/services/departments.py, from the sandbox's store. */
+function departmentsForPlant(plantId: number): Row[] {
+  const assigned = new Set((store.plant_department ?? [])
+    .filter((pd) => pd.plant_id === plantId).map((pd) => pd.department_id))
+  const terminal = new Set(store.status.filter((s) => s.is_terminal).map((s) => s.status_id))
+  const vessels = new Map<number, Set<string>>()
+  for (const r of store.blend_recipe.filter((r) => r.active && r.department_id)) {
+    if (!vessels.has(r.department_id)) vessels.set(r.department_id, new Set())
+    vessels.get(r.department_id)!.add(r.vessel_type || 'Blend')
+  }
+  return store.department
+    .filter((d) => d.active && assigned.has(d.department_id))
+    .sort((a, b) => String(a.description).localeCompare(String(b.description)))
+    .map((d) => ({
+      department_id: d.department_id,
+      code: d.code,
+      description: d.description,
+      open_orders: store.order.filter((o) => o.plant_id === plantId && o.active !== 0
+        && o.department_id === d.department_id && !terminal.has(o.status_id)).length,
+      runs_batches: vessels.has(d.department_id),
+      vessel_types: [...(vessels.get(d.department_id) ?? [])].sort(),
+    }))
+}
+
+function departmentMaterials(departmentId: number, plantId: number | null): Set<number> {
+  const found = new Set<number>()
+  const types = new Set(store.material_type.filter((t) => t.department_id === departmentId)
+    .map((t) => t.material_type_id))
+  for (const m of store.material) if (types.has(m.material_type_id)) found.add(m.material_id)
+  for (const r of store.blend_recipe.filter((r) => r.active && r.department_id === departmentId)) {
+    found.add(r.material_id)
+    for (const c of store.blend_recipe_component.filter((c) => c.recipe_id === r.recipe_id)) found.add(c.material_id)
+  }
+  const terminal = new Set(store.status.filter((s) => s.is_terminal).map((s) => s.status_id))
+  for (const o of store.order) {
+    if (o.department_id === departmentId && !terminal.has(o.status_id) && o.material_one_id
+      && (!plantId || o.plant_id === plantId)) found.add(o.material_one_id)
+  }
+  return found
+}
+
 /** The same tiles as pims/services/display.py, from the sandbox's store. */
-export function tankBoard(plantId: number): Row {
+export function tankBoard(plantId: number, departmentId: number | null = null): Row {
   const plant = byId.plant().get(plantId)
   if (!plant) return notFound(`Plant ${plantId} was not found.`)
   const types = new Map(store.location_type.map((t) => [t.location_type_id, t.name]))
@@ -1387,11 +1430,24 @@ export function tankBoard(plantId: number): Row {
         last_moved: lastMoved.get(l.location_id) ?? null,
       }
     })
+  let shown = tanks
+  let department: Row | null = null
+  if (departmentId) {
+    const d = byId.department().get(departmentId)
+    department = d ? { department_id: d.department_id, code: d.code, description: d.description } : null
+    const handled = departmentMaterials(departmentId, plantId)
+    const vessels = new Set(store.blend_recipe
+      .filter((r) => r.active && r.department_id === departmentId).map((r) => r.vessel_type))
+    const materialByNumber = new Map(store.material.map((m) => [m.number, m.material_id]))
+    shown = tanks.filter((t) => vessels.has(t.kind)
+      || t.products.some((p: Row) => p.lbs > 0.5 && handled.has(materialByNumber.get(p.number))))
+  }
   return {
     plant: { plant_id: plant.plant_id, code: plant.code, name: plant.name },
+    department,
     generated_at: nowIso(),
-    tanks,
-    abnormal: tanks.filter((t) => ['over', 'high', 'negative'].includes(t.state)).length,
+    tanks: shown,
+    abnormal: shown.filter((t) => ['over', 'high', 'negative'].includes(t.state)).length,
   }
 }
 
@@ -1413,6 +1469,17 @@ function recipeForMaterial(materialId: number): Row | null {
   const recipe = store.blend_recipe.find((r) => r.material_id === materialId && r.active)
   if (!recipe) return null
   return { ...recipe, components: recipeComponents(recipe.recipe_id) }
+}
+
+function chargeFor(quantity: number, yieldPct: number): number {
+  if (!quantity) return 0
+  return Math.round((quantity * 100 / (yieldPct || 100)) * 100) / 100
+}
+
+function batchPrefix(departmentId: number | null): string {
+  if (!departmentId) return 'B'
+  const letter = String(byId.department().get(departmentId)?.code ?? '').trim().slice(0, 1).toUpperCase()
+  return /^[A-Z]$/.test(letter) ? letter : 'B'
 }
 
 function blendPlan(params: Row): Row {
@@ -1469,8 +1536,16 @@ function blendPlan(params: Row): Row {
     return best
   }
 
+  // Pounds in for the pounds out the order wants (blend.py charge_for).
+  const yieldPct = Number(recipe!.yield_pct || 100)
+  const charge = chargeFor(target, yieldPct)
+  if (yieldPct < 100 && target) {
+    notes.push(`${yieldPct}% yield: ${Math.round(charge).toLocaleString()} lbs in for `
+      + `${Math.round(target).toLocaleString()} lbs out`)
+  }
+
   const components = (recipe!.components as Row[]).map((component) => {
-    const required = Math.round(target * component.percentage) / 100
+    const required = Math.round(charge * component.percentage) / 100
     const tank = bestTank(component.material_id)
     if (tank) {
       notes.push(`${tank.location.number} holds the most ${component.material_number} `
@@ -1489,10 +1564,10 @@ function blendPlan(params: Row): Row {
     }
   })
 
-  const blendType = store.location_type.find((t) => t.name === 'Blend')?.location_type_id
-  const destination = store.location.find(
-    (l) => l.plant_id === plantId && l.active && l.location_type_id === blendType,
-  )
+  const vesselType = store.location_type.find((t) => t.name === (recipe!.vessel_type || 'Blend'))?.location_type_id
+  const destination = store.location
+    .filter((l) => l.plant_id === plantId && l.active && l.location_type_id === vesselType)
+    .sort((a, b) => String(a.number).localeCompare(String(b.number)))[0]
   let headroom: number | null = null
   if (destination?.max_capacity) {
     let current = 0
@@ -1508,8 +1583,13 @@ function blendPlan(params: Row): Row {
     material_id: materialId,
     material_number: material.number,
     material_description: material.description,
-    recipe: { recipe_id: recipe!.recipe_id, name: recipe!.name, notes: recipe!.notes },
+    recipe: {
+      recipe_id: recipe!.recipe_id, name: recipe!.name, notes: recipe!.notes,
+      department_id: recipe!.department_id ?? null, yield_pct: yieldPct, vessel_type: recipe!.vessel_type || 'Blend',
+    },
     quantity: target,
+    yield_pct: yieldPct,
+    charge,
     components,
     to_location_id: destination?.location_id ?? null,
     to_location_number: destination?.number ?? null,
@@ -1540,14 +1620,26 @@ function blendExecute(payload: Row): Row {
   if (!components.length) fields.components = 'The batch has no components.'
   if (Object.keys(fields).length) invalid('This batch cannot be blended.', fields)
 
+  // The recipe, not the client, decides the yield.
+  const recipe = recipeForMaterial(materialId)
+  const yieldPct = Number(recipe?.yield_pct || 100)
+  const charge = chargeFor(quantity, yieldPct)
   const total = Math.round(components.reduce((sum, c) => sum + Number(c.quantity || 0), 0) * 100) / 100
-  if (Math.abs(total - quantity) > 0.5) {
+  if (Math.abs(total - charge) > 0.5 * Math.max(components.length, 1)) {
     invalid(
-      `The components add up to ${Math.round(total).toLocaleString()} lbs but the batch is `
-      + `${Math.round(quantity).toLocaleString()} lbs.`,
-      { components: 'Component quantities must sum to the batch quantity.' },
+      `The components add up to ${Math.round(total).toLocaleString()} lbs but the batch needs `
+      + `${Math.round(charge).toLocaleString()} lbs in`
+      + (yieldPct < 100 ? ` for ${Math.round(quantity).toLocaleString()} lbs out at ${yieldPct}% yield.` : '.'),
+      { components: 'Component quantities must sum to the batch charge.' },
     )
   }
+  // Each component's share of the output; the last takes the rounding.
+  const outputs: number[] = components.slice(0, -1)
+    .map((c) => Math.round(Number(c.quantity) * quantity / total * 100) / 100)
+  outputs.push(Math.round((quantity - outputs.reduce((a, b) => a + b, 0)) * 100) / 100)
+  const departmentId = recipe?.department_id ?? null
+  const prefix = batchPrefix(departmentId)
+  const department = departmentId ? byId.department().get(departmentId) : null
 
   let order: Row | undefined
   let plantId = payload.plant_id ? Number(payload.plant_id) : null
@@ -1581,11 +1673,13 @@ function blendExecute(payload: Row): Row {
     }
   }
 
-  const sequence = store.number_sequence.find((row) => row.key === 'blend')
-    ?? (store.number_sequence.push({ key: 'blend', next_value: 5_000 }),
+  const sequenceKey = prefix === 'B' ? 'blend' : `batch-${prefix}`
+  const sequence = store.number_sequence.find((row) => row.key === sequenceKey)
+    ?? (store.number_sequence.push({ key: sequenceKey, next_value: prefix === 'B' ? 5_000 : 1 }),
         store.number_sequence[store.number_sequence.length - 1])
-  const batchId = `B-${String(sequence.next_value).padStart(5, '0')}`
+  const batchId = `${prefix}-${String(sequence.next_value).padStart(5, '0')}`
   sequence.next_value += 1
+  const label = prefix === 'B' ? 'Blend' : department?.description ?? 'Batch'
 
   const serial = order?.blend_serial_number || ''
   components.forEach((component, index) => {
@@ -1595,19 +1689,21 @@ function blendExecute(payload: Row): Row {
       from_location_id: component.from_location_id,
       from_material_id: component.material_id,
       from_qty: component.quantity,
+      department_id: departmentId,
       to_location_id: payload.to_location_id,
       to_material_id: materialId,
-      to_qty: component.quantity,
+      to_qty: outputs[index],
       user_date: payload.user_date,
       remarks: payload.remarks
-        || `Blend batch ${batchId}${serial ? ` (serial ${serial})` : ''}`,
+        || `${label} batch ${batchId}${serial ? ` (serial ${serial})` : ''}`
+        + (yieldPct < 100 ? ` · ${yieldPct}% yield` : ''),
     })
     const row = store.inventory_transaction.find((t) => t.transaction_id === txn.transaction_id)!
     row.batch_id = batchId
     row.idempotency_key = index === 0 && idempotencyKey ? idempotencyKey : null
   })
   audit('blend.batch', 'blend_batch', batchId,
-    `Blended ${Math.round(quantity).toLocaleString()} lbs in batch ${batchId}`
+    `${prefix === 'B' ? 'Blended' : 'Ran'} ${Math.round(quantity).toLocaleString()} lbs in batch ${batchId}`
     + (order ? ` on order ${order.order_id}` : ''),
     { components, to_location_id: payload.to_location_id }, order?.order_id ?? null)
   return blendBatch(batchId)
@@ -1626,6 +1722,7 @@ function blendBatch(batchId: string): Row {
     product_description: rows[0].to_material_description,
     to_location_number: rows[0].to_location_number,
     quantity: Math.round(rows.filter((r) => !r.voided).reduce((sum, r) => sum + r.to_qty, 0) * 100) / 100,
+    charged: Math.round(rows.filter((r) => !r.voided).reduce((sum, r) => sum + r.from_qty, 0) * 100) / 100,
     voided: rows.every((r) => r.voided),
     transactions: rows,
   }
@@ -2659,6 +2756,10 @@ async function route(method: string, path: string, body: Row): Promise<any> {
     requireUser()
     return store.blend_recipe.filter((r) => r.active).map((r) => ({
       ...r,
+      yield_pct: r.yield_pct ?? 100,
+      vessel_type: r.vessel_type ?? 'Blend',
+      department_code: byId.department().get(r.department_id)?.code ?? null,
+      department: byId.department().get(r.department_id)?.description ?? null,
       material_number: byId.material().get(r.material_id)?.number ?? null,
       material_description: byId.material().get(r.material_id)?.description ?? null,
       components: recipeComponents(r.recipe_id),
@@ -2824,7 +2925,15 @@ async function route(method: string, path: string, body: Row): Promise<any> {
   }
   if (method === 'GET' && match(path, '/api/display/tanks')) {
     const fromToken = String(params.token ?? '').match(/^sandbox-(\d+)$/)
-    return tankBoard(fromToken ? Number(fromToken[1]) : Number(params.plant_id || 1))
+    return tankBoard(
+      fromToken ? Number(fromToken[1]) : Number(params.plant_id || 1),
+      params.department_id ? Number(params.department_id) : null,
+    )
+  }
+  if (method === 'GET' && match(path, '/api/departments')) {
+    const user = requireUser()
+    requirePlant(user, Number(params.plant_id))
+    return departmentsForPlant(Number(params.plant_id))
   }
   if (method === 'GET' && match(path, '/api/balances')) {
     return balances({

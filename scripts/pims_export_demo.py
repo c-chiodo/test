@@ -27,6 +27,7 @@ TABLES = [
     "company",
     "plant",
     "department",
+    "plant_department",
     "order_type",
     "status",
     "material_type",

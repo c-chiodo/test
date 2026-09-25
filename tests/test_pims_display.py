@@ -50,10 +50,11 @@ def _tile(board: dict, location_id: int) -> dict:
 
 def test_every_tank_at_the_plant_gets_a_tile_with_the_ledger_total(conn):
     board = display.tanks(1, conn)
+    marks = ", ".join("?" for _ in display.TANK_TYPES)
     tanks = db.query(
         "SELECT l.location_id FROM location l JOIN location_type lt ON lt.location_type_id = l.location_type_id"
-        " WHERE l.plant_id = 1 AND l.active = 1 AND lt.name IN ('Tank', 'Blend')",
-        (), conn,
+        f" WHERE l.plant_id = 1 AND l.active = 1 AND lt.name IN ({marks})",
+        list(display.TANK_TYPES), conn,
     )
     assert {t["location_id"] for t in board["tanks"]} == {t["location_id"] for t in tanks}
     for tile in board["tanks"]:

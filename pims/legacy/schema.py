@@ -118,6 +118,7 @@ LEGACY_MAP = LegacyMap(
         Table("material_type", ("dbo.[MaterialType]",), "material_type", (
             req("material_type_id", "Materialtype_id"),
             req("name", "Description", "Code"),
+            opt("department_id", "Department_Id"),
         ), id_column="Materialtype_id"),
         Table("material", ("dbo.[Material]",), "material", (
             req("material_id", "Material_id"),

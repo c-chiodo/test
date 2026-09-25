@@ -9,8 +9,13 @@ import { DEMO, api } from '../lib/api'
 import { useApp, useToast } from '../App'
 import { Modal } from './ui'
 
-export default function PopOutTanks({ className = 'sm' }: { className?: string }) {
+/** ``department``: pop out only that department's tanks (the acid room's board). */
+export default function PopOutTanks({ className = 'sm', department = null }: {
+  className?: string
+  department?: { department_id: number; description: string } | null
+}) {
   const { plantId, plantCode } = useApp()
+  const dept = department?.department_id
   const toast = useToast()
   const [link, setLink] = useState<string>('')
   const [busy, setBusy] = useState(false)
@@ -18,17 +23,17 @@ export default function PopOutTanks({ className = 'sm' }: { className?: string }
 
   async function boardUrl(): Promise<string> {
     const minted = await api.post<{ token: string }>('/api/display/token', {
-      plant_id: plantId, label: `${plantCode} tank board`,
+      plant_id: plantId, label: `${plantCode} ${department ? `${department.description} ` : ''}tank board`,
     })
     const base = window.location.href.split('#')[0]
-    return `${base}#/board?t=${encodeURIComponent(minted.token)}&plant=${plantId}`
+    return `${base}#/board?t=${encodeURIComponent(minted.token)}&plant=${plantId}${dept ? `&dept=${dept}` : ''}`
   }
 
   async function popOut() {
     setBusy(true)
     try {
       const url = await boardUrl()
-      const popup = window.open(url, `pims-tanks-${plantId}`, 'popup,width=1400,height=860')
+      const popup = window.open(url, `pims-tanks-${plantId}-${dept ?? 'all'}`, 'popup,width=1400,height=860')
       if (!popup) {
         // Pop-ups blocked: offer the link instead, which also works for a
         // screen attached to another computer.
@@ -53,7 +58,7 @@ export default function PopOutTanks({ className = 'sm' }: { className?: string }
         return
       }
       try {
-        const data = await api.get(`/api/display/tanks?plant_id=${plantId}`)
+        const data = await api.get(`/api/display/tanks?plant_id=${plantId}${dept ? `&department_id=${dept}` : ''}`)
         popup.postMessage({ type: 'pims-tanks', data }, '*')
       } catch { /* the board keeps its last numbers and says how old they are */ }
     }

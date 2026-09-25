@@ -57,7 +57,9 @@ CREATE TABLE IF NOT EXISTS status (
 
 CREATE TABLE IF NOT EXISTS material_type (
     material_type_id INTEGER PRIMARY KEY,
-    name             TEXT NOT NULL UNIQUE
+    name             TEXT NOT NULL UNIQUE,
+    -- The legacy MaterialType.Department_Id: which department handles it.
+    department_id    INTEGER REFERENCES department(department_id)
 );
 
 CREATE TABLE IF NOT EXISTS material (
@@ -461,11 +463,18 @@ CREATE TABLE IF NOT EXISTS system_setting (
 -- movement, it is PRODUCE, several times, atomically.
 
 CREATE TABLE IF NOT EXISTS blend_recipe (
-    recipe_id   INTEGER PRIMARY KEY AUTOINCREMENT,
-    material_id INTEGER NOT NULL REFERENCES material(material_id),
-    name        TEXT NOT NULL,
-    notes       TEXT NOT NULL DEFAULT '',
-    active      INTEGER NOT NULL DEFAULT 1
+    recipe_id     INTEGER PRIMARY KEY AUTOINCREMENT,
+    material_id   INTEGER NOT NULL REFERENCES material(material_id),
+    name          TEXT NOT NULL,
+    notes         TEXT NOT NULL DEFAULT '',
+    active        INTEGER NOT NULL DEFAULT 1,
+    -- The department that runs it (Blending, Acid, ...); NULL = Blending.
+    department_id INTEGER REFERENCES department(department_id),
+    -- Pounds of product per 100 lbs charged. A blend keeps everything (100);
+    -- acidulation splits off acid water, so less comes out than goes in.
+    yield_pct     REAL NOT NULL DEFAULT 100,
+    -- The location type the batch runs in: 'Blend' tank, 'Acid' reactor.
+    vessel_type   TEXT NOT NULL DEFAULT 'Blend'
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS ux_recipe_material

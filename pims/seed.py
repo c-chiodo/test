@@ -42,7 +42,11 @@ DEPARTMENTS = [
     (3, "BLND", "Blending"),
     (4, "PROC", "Processing"),
     (5, "QC", "Quality Control"),
+    (6, "ACID", "Acid"),
 ]
+
+#: Departments not every plant has. Acidulation runs where the soapstock is.
+PLANT_DEPARTMENTS = {"ACID": ("DM", "SC")}
 
 ORDER_TYPES = [
     (1, "SO", "Sales Order"),
@@ -72,6 +76,7 @@ LOCATION_TYPES = [
     (3, "Loadout"),
     (4, "Blend"),
     (5, "Trailer"),
+    (6, "Acid"),
 ]
 
 TRANSACTION_TYPES = [
@@ -333,6 +338,19 @@ BLEND_RECIPES = [
     ("05001", "AV4000", [("02005", 70.0), ("02001", 30.0)]),
 ]
 
+#: Acidulation: veg soapstock split with acid into acidulated soapstock
+#: (02001, which the blend recipes above consume) and acid water. The
+#: materials are the plant's own; the proportions and the yield are not —
+#: nobody has told us them — so they are marked as placeholders to replace.
+ACID_RECIPES = [
+    ("02001", "Acidulated Soapstock", [("02005", 90.0), ("00001", 6.0), ("00010", 4.0)]),
+]
+ACID_YIELD = 80.0
+ACID_NOTE = (
+    "Placeholder proportions and yield for the sandbox — set the acid "
+    "department's real charge and yield before using it."
+)
+
 #: Kiosk PINs for the shared plant terminal. Demo values.
 USER_PINS = {"cchiodo": "4021", "jmartin": "2210", "rprice": "3317", "toperator": "5588"}
 
@@ -350,17 +368,26 @@ def seed_all(conn: sqlite3.Connection | None = None) -> None:
         _seed_partners(conn)
         user_ids = _seed_users(conn)
         _seed_activity(conn, rng, material_ids, location_ids, user_ids)
+        _seed_acid(conn, material_ids, user_ids)
+        _seed_deliveries(conn, material_ids)
 
 
 def _seed_recipes(conn, material_ids: dict[str, int]) -> None:
-    for product, name, parts in BLEND_RECIPES:
+    departments = {code: did for did, code, _d in DEPARTMENTS}
+    recipes = [(p, n, parts, "BLND", 100.0, "Blend", "Demo formulation — replace with the plant's real recipe.")
+               for p, n, parts in BLEND_RECIPES]
+    recipes += [(*recipe, "ACID", ACID_YIELD, "Acid", ACID_NOTE) for recipe in ACID_RECIPES]
+    for product, name, parts, department, yield_pct, vessel, note in recipes:
         recipe_id = db.insert(
             "blend_recipe",
             {
                 "material_id": material_ids[product],
                 "name": name,
-                "notes": "Demo formulation — replace with the plant's real recipe.",
+                "notes": note,
                 "active": 1,
+                "department_id": departments[department],
+                "yield_pct": yield_pct,
+                "vessel_type": vessel,
             },
             conn,
         )
@@ -386,8 +413,10 @@ def _seed_reference(conn) -> None:
         db.insert(
             "department", {"department_id": did, "code": code, "description": desc}, conn
         )
-    for pid, _c, _n in PLANTS:
-        for did, _c2, _d2 in DEPARTMENTS:
+    for pid, plant_code, _n in PLANTS:
+        for did, dept_code, _d2 in DEPARTMENTS:
+            if plant_code not in PLANT_DEPARTMENTS.get(dept_code, (plant_code,)):
+                continue
             db.insert("plant_department", {"plant_id": pid, "department_id": did}, conn)
     for oid, code, desc in ORDER_TYPES:
         db.insert(
@@ -1102,3 +1131,105 @@ def _seed_qc(conn, rng, *, order_id, plant_id, material_number, material_id, sta
                     {"header_id": header_id, "question_id": qid, "response": response},
                     conn,
                 )
+
+
+def _seed_acid(conn, material_ids: dict[str, int], user_ids: dict[str, int]) -> None:
+    """An acid reactor and open acid work at each plant that runs acidulation.
+
+    Written after everything else, with fixed values rather than the shared
+    random stream, so adding a department did not reshuffle the rest of the
+    demo ledger.
+    """
+
+    acid_id = next(did for did, code, _d in DEPARTMENTS if code == "ACID")
+    acid_type = next(tid for tid, name in LOCATION_TYPES if name == "Acid")
+    order_id = int(db.scalar('SELECT MAX(order_id) FROM "order"', (), conn) or 0)
+    today = utc_now().date()
+    work = {"DM": (16_000.0, 24_000.0), "SC": (20_000.0, 12_000.0)}
+    for plant_id, code, _name in PLANTS:
+        if code not in PLANT_DEPARTMENTS["ACID"]:
+            continue
+        db.insert(
+            "location",
+            {
+                "plant_id": plant_id,
+                "number": f"{code}-ACID-1",
+                "description": "Acid reactor 1",
+                "location_type_id": acid_type,
+                "company_id": 1,
+                "max_capacity": 90_000,
+                "bol_required": 0,
+            },
+            conn,
+        )
+        for index, qty in enumerate(work[code]):
+            order_id += 1
+            db.insert(
+                "order",
+                {
+                    "order_id": order_id,
+                    "order_type_id": 2,
+                    "order_date": today.isoformat(),
+                    "due_date": (today + timedelta(days=1 + 2 * index)).isoformat(),
+                    "order_reference": f"ACID-{code}-{index + 1}",
+                    "company_id": 1,
+                    "plant_id": plant_id,
+                    "department_id": acid_id,
+                    "blend_serial_number": "",
+                    "material_one_id": material_ids["02001"],
+                    "material_one_quantity": qty,
+                    "ship_method": "",
+                    "trailer_number": "",
+                    "comments": "",
+                    "status_id": 1,
+                    "date_added": utc_now().replace(microsecond=0).isoformat(),
+                    "added_by": "jmartin",
+                },
+                conn,
+            )
+
+
+def _seed_deliveries(conn, material_ids: dict[str, int]) -> None:
+    """Purchase orders with the truck still to arrive, so Receiving has work.
+
+    Every seeded purchase order before this was received the moment it was
+    raised, which left the receiving lane — and the receive screen's list of
+    deliveries — permanently empty in the demo.
+    """
+
+    receiving = next(did for did, code, _d in DEPARTMENTS if code == "RECV")
+    order_id = int(db.scalar('SELECT MAX(order_id) FROM "order"', (), conn) or 0)
+    today = utc_now().date()
+    expected = {
+        "DM": (("02005", 22_000.0, 2), ("00001", 18_000.0, 5)),
+        "SC": (("02005", 22_000.0, 1),),
+        "PJ": (("00001", 18_000.0, 3),),
+        "LV": (("00001", 12_000.0, 4),),
+    }
+    for plant_id, code, _name in PLANTS:
+        for index, (number, qty, vendor) in enumerate(expected.get(code, ())):
+            order_id += 1
+            db.insert(
+                "order",
+                {
+                    "order_id": order_id,
+                    "order_type_id": 3,
+                    "order_date": today.isoformat(),
+                    "due_date": (today + timedelta(days=index)).isoformat(),
+                    "order_reference": f"PO-{code}-{index + 1}",
+                    "company_id": 1,
+                    "plant_id": plant_id,
+                    "department_id": receiving,
+                    "blend_serial_number": "",
+                    "vendor_id": vendor,
+                    "material_one_id": material_ids[number],
+                    "material_one_quantity": qty,
+                    "ship_method": "",
+                    "trailer_number": "",
+                    "comments": "",
+                    "status_id": 1,
+                    "date_added": utc_now().replace(microsecond=0).isoformat(),
+                    "added_by": "jmartin",
+                },
+                conn,
+            )

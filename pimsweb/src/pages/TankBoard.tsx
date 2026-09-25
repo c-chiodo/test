@@ -29,10 +29,14 @@ export const STATE_LABEL: Record<string, string> = {
   negative: 'CHECK — NEGATIVE',
 }
 
-function boardParams(): { token: string; plantId: number | null } {
+function boardParams(): { token: string; plantId: number | null; departmentId: number | null } {
   const query = window.location.hash.split('?')[1] ?? ''
   const params = new URLSearchParams(query)
-  return { token: params.get('t') ?? '', plantId: params.get('plant') ? Number(params.get('plant')) : null }
+  return {
+    token: params.get('t') ?? '',
+    plantId: params.get('plant') ? Number(params.get('plant')) : null,
+    departmentId: params.get('dept') ? Number(params.get('dept')) : null,
+  }
 }
 
 function ago(iso: string | null, now: number): string {
@@ -47,7 +51,7 @@ function ago(iso: string | null, now: number): string {
 }
 
 export default function TankBoard() {
-  const { token, plantId } = useMemo(boardParams, [])
+  const { token, plantId, departmentId } = useMemo(boardParams, [])
   const [data, setData] = useState<TankBoardData | null>(null)
   const [fetchedAt, setFetchedAt] = useState<number>(0)
   const [error, setError] = useState<string>('')
@@ -63,7 +67,9 @@ export default function TankBoard() {
   const load = useCallback(async () => {
     try {
       const result = await api.get<TankBoardData>(
-        `/api/display/tanks${qs({ token, plant_id: token ? undefined : plantId ?? undefined })}`,
+        `/api/display/tanks${qs({
+          token, plant_id: token ? undefined : plantId ?? undefined, department_id: departmentId ?? undefined,
+        })}`,
       )
       setData(result)
       setFetchedAt(Date.now())
@@ -71,7 +77,7 @@ export default function TankBoard() {
     } catch (err) {
       setError((err as Error).message)
     }
-  }, [token, plantId])
+  }, [token, plantId, departmentId])
 
   // In the sandbox there is no server: the window that opened this board
   // pushes its live numbers across, so a load posted there shows here.
@@ -119,7 +125,7 @@ export default function TankBoard() {
     <div className="board-page">
       <header className="board-head">
         <div className="board-title">
-          <strong>{data.plant.code}</strong> {data.plant.name} · Tanks
+          <strong>{data.plant.code}</strong> {data.plant.name} · {data.department ? `${data.department.description} tanks` : 'Tanks'}
         </div>
         {abnormal.length > 0 && (
           <div className="board-alarm" role="status">

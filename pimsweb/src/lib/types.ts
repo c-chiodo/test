@@ -66,6 +66,7 @@ export interface Order {
   plant_id: number
   plant_code: string
   department_code: string | null
+  department_id: number | null
   status: string
   status_id: number
   is_terminal: number
@@ -265,7 +266,18 @@ export interface TankTile {
 
 export interface TankBoardData {
   plant: { plant_id: number; code: string; name: string }
+  department?: { department_id: number; code: string; description: string } | null
   generated_at: string
   tanks: TankTile[]
   abnormal: number
+}
+
+export interface Department {
+  department_id: number
+  code: string
+  description: string
+  open_orders: number
+  runs_batches: boolean
+  /** Where its batches run: 'Blend' belongs to the Blend screen, others get their own. */
+  vessel_types: string[]
 }

@@ -19,6 +19,14 @@ Three deliberate choices:
   pounds per component, the tank that will supply each, and whether it can.
   The execute step re-checks everything inside one transaction, so a plan
   that went stale while the operator read it fails whole, not half.
+
+The same engine runs every department's batches. A recipe names the
+department that runs it, the kind of vessel it runs in, and its yield: a
+blend keeps every pound it is given (100%), acidulation splits soapstock into
+acidulated soapstock and acid water, so fewer pounds come out than go in. The
+work order asks for pounds *out*; the plan charges ``out / yield`` pounds in
+and the difference is the process loss, recorded on the PRODUCE rows the way
+the legacy Produce screen recorded any yield below 100%.
 """
 
 from __future__ import annotations
@@ -37,9 +45,12 @@ from . import inventory, numbering
 def recipes(conn=None, include_inactive: bool = False) -> list[dict]:
     sql = """
         SELECT r.recipe_id, r.material_id, r.name, r.notes, r.active,
+               r.department_id, r.yield_pct, r.vessel_type,
+               d.code AS department_code, d.description AS department,
                m.number AS material_number, m.description AS material_description
         FROM blend_recipe r
         JOIN material m ON m.material_id = r.material_id
+        LEFT JOIN department d ON d.department_id = r.department_id
     """
     if not include_inactive:
         sql += " WHERE r.active = 1"
@@ -82,6 +93,10 @@ def set_recipe(
     user: dict,
     notes: str = "",
     conn=None,
+    *,
+    department_id: int | None = None,
+    yield_pct: float = 100.0,
+    vessel_type: str = "Blend",
 ) -> dict:
     """Create or replace the recipe for a product.
 
@@ -102,6 +117,13 @@ def set_recipe(
             f"Component percentages add up to {total:g}, not 100.",
             fields={"components": "Percentages by weight must sum to 100."},
         )
+    yield_pct = float(yield_pct if yield_pct not in (None, "") else 100.0)
+    if not 0 < yield_pct <= 100:
+        raise ValidationError(
+            f"A yield of {yield_pct:g}% is not possible.",
+            fields={"yield_pct": "Yield is pounds out per 100 lbs in: above 0, at most 100."},
+        )
+    vessel_type = (vessel_type or "Blend").strip() or "Blend"
     seen: set[int] = set()
     for component in components:
         cid = int(component["material_id"])
@@ -130,7 +152,10 @@ def set_recipe(
         )
         recipe_id = db.insert(
             "blend_recipe",
-            {"material_id": material_id, "name": name.strip(), "notes": notes, "active": 1},
+            {
+                "material_id": material_id, "name": name.strip(), "notes": notes, "active": 1,
+                "department_id": department_id, "yield_pct": yield_pct, "vessel_type": vessel_type,
+            },
             conn,
         )
         for index, component in enumerate(components):
@@ -150,7 +175,10 @@ def set_recipe(
             entity="blend_recipe",
             entity_id=recipe_id,
             summary=f"Recipe set for material {material_id}",
-            detail={"name": name, "components": components},
+            detail={
+                "name": name, "components": components, "department_id": department_id,
+                "yield_pct": yield_pct, "vessel_type": vessel_type,
+            },
             conn=conn,
         )
     result = recipe_for_material(material_id, conn)
@@ -221,10 +249,18 @@ def plan(
     if order is not None and target:
         notes.append(f"{target:,.0f} lbs outstanding on order {order['order_id']}")
 
+    # Pounds in for the pounds out the order wants.
+    yield_pct = float(recipe.get("yield_pct") or 100.0)
+    charge = charge_for(target, yield_pct)
+    if yield_pct < 100 and target:
+        notes.append(
+            f"{yield_pct:g}% yield: {charge:,.0f} lbs in for {target:,.0f} lbs out"
+        )
+
     balances = inventory.location_balance(plant_id=plant_id, conn=conn)
     components: list[dict[str, Any]] = []
     for component in recipe["components"]:
-        required = round_lbs(target * component["percentage"] / 100.0)
+        required = round_lbs(charge * component["percentage"] / 100.0)
         holdings = sorted(
             (b for b in balances if b["material_id"] == component["material_id"]),
             key=lambda b: -b["balance"],
@@ -254,10 +290,11 @@ def plan(
         SELECT l.location_id, l.number, l.max_capacity
         FROM location l
         JOIN location_type lt ON lt.location_type_id = l.location_type_id
-        WHERE l.plant_id = ? AND l.active = 1 AND lt.name = 'Blend'
+        WHERE l.plant_id = ? AND l.active = 1 AND lt.name = ?
+        ORDER BY l.number
         LIMIT 1
         """,
-        (plant_id,),
+        (plant_id, recipe.get("vessel_type") or "Blend"),
         conn,
     )
     headroom = None
@@ -273,8 +310,12 @@ def plan(
         "material_id": material_id,
         "material_number": material["number"],
         "material_description": material["description"],
-        "recipe": {k: recipe[k] for k in ("recipe_id", "name", "notes")},
+        "recipe": {k: recipe.get(k) for k in (
+            "recipe_id", "name", "notes", "department_id", "yield_pct", "vessel_type",
+        )},
         "quantity": target,
+        "yield_pct": yield_pct,
+        "charge": charge,
         "components": components,
         "to_location_id": destination["location_id"] if destination else None,
         "to_location_number": destination["number"] if destination else None,
@@ -283,6 +324,25 @@ def plan(
         "does_not_fit": headroom is not None and target - headroom > 0.01,
         "notes": notes,
     }
+
+
+def charge_for(quantity: float, yield_pct: float) -> float:
+    """Pounds in for ``quantity`` pounds out at ``yield_pct``."""
+
+    if not quantity:
+        return 0.0
+    return round_lbs(float(quantity) * 100.0 / float(yield_pct or 100.0))
+
+
+def batch_prefix(department_id: int | None, conn=None) -> str:
+    """``B`` for Blending, otherwise the department code's first letter —
+    so an acid batch reads ``A-00012`` on the floor and in Activity."""
+
+    if not department_id:
+        return "B"
+    code = db.scalar("SELECT code FROM department WHERE department_id = ?", (department_id,), conn)
+    letter = (str(code or "").strip()[:1] or "B").upper()
+    return letter if letter.isalpha() else "B"
 
 
 # ------------------------------------------------------------------ execute
@@ -333,13 +393,27 @@ def execute(payload: dict[str, Any], user: dict, conn=None) -> dict:
     if errors:
         raise ValidationError("This batch cannot be blended.", fields=errors)
 
+    # The recipe, not the client, decides the yield: a batch posted with a
+    # made-up yield would make product out of nothing.
+    recipe = recipe_for_material(material_id, conn) if material_id else None
+    yield_pct = float((recipe or {}).get("yield_pct") or 100.0)
+    charge = charge_for(quantity, yield_pct)
     total = round_lbs(sum(float(c.get("quantity") or 0) for c in components))
-    if abs(total - quantity) > 0.5:
+    if abs(total - charge) > 0.5 * max(len(components), 1):
         raise ValidationError(
-            f"The components add up to {total:,.0f} lbs but the batch is "
-            f"{quantity:,.0f} lbs.",
-            fields={"components": "Component quantities must sum to the batch quantity."},
+            f"The components add up to {total:,.0f} lbs but the batch needs "
+            f"{charge:,.0f} lbs in"
+            + (f" for {quantity:,.0f} lbs out at {yield_pct:g}% yield." if yield_pct < 100 else "."),
+            fields={"components": "Component quantities must sum to the batch charge."},
         )
+    # Each component's share of the output, the last one taking the rounding
+    # so the pounds produced are exactly the pounds the order is credited.
+    outputs: list[float] = []
+    for component in components[:-1]:
+        outputs.append(round_lbs(float(component["quantity"]) * quantity / total))
+    outputs.append(round_lbs(quantity - sum(outputs)))
+    department_id = (recipe or {}).get("department_id")
+    prefix = batch_prefix(department_id, conn)
 
     order = None
     order_id = payload.get("order_id")
@@ -364,23 +438,27 @@ def execute(payload: dict[str, Any], user: dict, conn=None) -> dict:
     require_plant(user, int(plant_id), conn)
 
     with db.transaction(conn):
-        batch_id = f"B-{numbering.next_in_sequence('blend', conn):05d}"
+        sequence = "blend" if prefix == "B" else f"batch-{prefix}"
+        batch_id = f"{prefix}-{numbering.next_in_sequence(sequence, conn):05d}"
         serial = order["blend_serial_number"] if order else ""
+        label = "Blend" if prefix == "B" else (recipe or {}).get("department") or "Batch"
         for index, component in enumerate(components):
             txn = inventory.post(
                 "PRODUCE",
                 {
                     "order_id": order_id,
                     "plant_id": plant_id,
+                    "department_id": department_id,
                     "from_location_id": component["from_location_id"],
                     "from_material_id": component["material_id"],
                     "from_qty": float(component["quantity"]),
                     "to_location_id": to_location_id,
                     "to_material_id": material_id,
-                    "to_qty": float(component["quantity"]),
+                    "to_qty": outputs[index],
                     "user_date": payload.get("user_date"),
                     "remarks": payload.get("remarks")
-                    or f"Blend batch {batch_id}" + (f" (serial {serial})" if serial else ""),
+                    or f"{label} batch {batch_id}" + (f" (serial {serial})" if serial else "")
+                    + (f" · {yield_pct:g}% yield" if yield_pct < 100 else ""),
                     "idempotency_key": f"{idempotency_key}:{index}" if idempotency_key else None,
                 },
                 user,
@@ -399,7 +477,7 @@ def execute(payload: dict[str, Any], user: dict, conn=None) -> dict:
             entity="blend_batch",
             entity_id=batch_id,
             order_id=order_id,
-            summary=f"Blended {quantity:,.0f} lbs in batch {batch_id}"
+            summary=f"{'Blended' if prefix == 'B' else 'Ran'} {quantity:,.0f} lbs in batch {batch_id}"
             + (f" on order {order_id}" if order_id else ""),
             detail={"components": components, "to_location_id": to_location_id},
             conn=conn,
@@ -422,6 +500,7 @@ def batch(batch_id: str, conn=None) -> dict:
         "product_description": rows[0]["to_material_description"],
         "to_location_number": rows[0]["to_location_number"],
         "quantity": round_lbs(sum(r["to_qty"] for r in rows if not r["voided"])),
+        "charged": round_lbs(sum(r["from_qty"] for r in rows if not r["voided"])),
         "voided": all(r["voided"] for r in rows),
         "transactions": rows,
     }

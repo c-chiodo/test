@@ -99,6 +99,21 @@ def main(argv: list[str] | None = None) -> int:
     legacy_cmd.add_argument("--name", default="")
     legacy_cmd.add_argument("--role", default="admin")
 
+    dept_cmd = sub.add_parser("department", help="list or add departments, or set a batch recipe")
+    dept_cmd.add_argument("action", choices=["list", "add", "recipe"])
+    dept_cmd.add_argument("--plant", default="DM", help="plant code for list")
+    dept_cmd.add_argument("--code", help="department code, e.g. ACID")
+    dept_cmd.add_argument("--name", help="department name, e.g. Acid")
+    dept_cmd.add_argument("--plants", default="", help="comma-separated plant codes for add")
+    dept_cmd.add_argument("--product", help="product number the recipe makes, e.g. 02001")
+    dept_cmd.add_argument(
+        "--component", action="append", default=[],
+        help="NUMBER=PERCENT of the charge, repeatable, e.g. --component 02005=90",
+    )
+    dept_cmd.add_argument("--yield", dest="yield_pct", type=float, default=100.0,
+                          help="lbs out per 100 lbs in")
+    dept_cmd.add_argument("--vessel", default="Blend", help="location type the batch runs in")
+
     gp_cmd = sub.add_parser("gp-sync", help="pull Great Plains master data")
     gp_cmd.add_argument("--file", default=None, help="JSON export to read instead of the stub")
     gp_cmd.add_argument("--dry-run", action="store_true")
@@ -227,6 +242,49 @@ def main(argv: list[str] | None = None) -> int:
             return 2
         password = os.environ.get("PIMS_NEW_USER_PASSWORD") or getpass.getpass("Password: ")
         _print(legacy_service.create_local_account(args.username, args.name, password, args.role))
+        return 0
+
+    if args.command == "department":
+        from .services import blend, departments, jobs
+
+        db.init_db(settings)
+        if args.action == "list":
+            plant_id = db.scalar("SELECT plant_id FROM plant WHERE code = ?", (args.plant.upper(),))
+            if not plant_id:
+                parser.error(f"no plant {args.plant}")
+            _print(departments.for_plant(plant_id))
+            return 0
+        if not args.code:
+            parser.error("--code is required")
+        if args.action == "add":
+            if not args.name:
+                parser.error("--name is required")
+            plants = [p for p in args.plants.split(",") if p.strip()]
+            _print(departments.add(args.code, args.name, plants))
+            return 0
+        # recipe: the charge, the yield and the vessel for one product.
+        if not args.product or not args.component:
+            parser.error("--product and at least one --component are required")
+        department_id = db.scalar("SELECT department_id FROM department WHERE code = ?", (args.code.upper(),))
+        if not department_id:
+            parser.error(f"no department {args.code}")
+
+        def material(number: str) -> int:
+            found = db.scalar("SELECT material_id FROM material WHERE number = ?", (number.strip(),))
+            if not found:
+                parser.error(f"no material {number}")
+            return int(found)
+
+        parts = []
+        for item in args.component:
+            number, _, pct = item.partition("=")
+            parts.append({"material_id": material(number), "percentage": float(pct or 0)})
+        product = material(args.product)
+        name = db.scalar("SELECT description FROM material WHERE material_id = ?", (product,))
+        _print(blend.set_recipe(
+            product, name, parts, jobs.system_user(), notes="Set from the command line.",
+            department_id=department_id, yield_pct=args.yield_pct, vessel_type=args.vessel,
+        ))
         return 0
 
     if args.command == "gp-sync":

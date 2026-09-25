@@ -23,12 +23,12 @@ from .. import audit, db
 from ..errors import AuthError, NotFound, ValidationError
 from ..security import require_permission, require_plant
 from ..util import utc_now, utc_now_iso
-from . import inventory
+from . import departments as departments_service, inventory
 
 TOKEN_DAYS = 90
 
 #: Location types that are shown as tanks.
-TANK_TYPES = ("Tank", "Blend")
+TANK_TYPES = ("Tank", "Blend", "Acid")
 
 HIGH_PERCENT = 95.0
 WARN_PERCENT = 85.0
@@ -58,8 +58,12 @@ def _state(total: float, capacity: float | None) -> str:
     return "normal"
 
 
-def tanks(plant_id: int, conn=None) -> dict[str, Any]:
-    """One tile per tank at the plant, in tank-number order."""
+def tanks(plant_id: int, conn=None, department_id: int | None = None) -> dict[str, Any]:
+    """One tile per tank at the plant, in tank-number order.
+
+    With ``department_id``, only that department's tanks: those holding a
+    material it handles, and the vessels its batches run in.
+    """
 
     plant = db.query_one("SELECT plant_id, code, name FROM plant WHERE plant_id = ?", (plant_id,), conn)
     if plant is None:
@@ -125,8 +129,24 @@ def tanks(plant_id: int, conn=None) -> dict[str, Any]:
                 "last_moved": last_moved.get(loc["location_id"]),
             }
         )
+    department = None
+    if department_id:
+        department = departments_service.get(int(department_id), conn)
+        handled = departments_service.materials(int(department_id), plant_id, conn)
+        vessels = departments_service.vessel_types(int(department_id), conn)
+        keep = {
+            loc["location_id"]
+            for loc in locations
+            if loc["kind"] in vessels
+            or any(
+                r["material_id"] in handled and r["balance"] > 0.5
+                for r in balances.get(loc["location_id"], [])
+            )
+        }
+        tiles = [tile for tile in tiles if tile["location_id"] in keep]
     return {
         "plant": plant,
+        "department": department,
         "generated_at": utc_now_iso(),
         "tanks": tiles,
         "abnormal": sum(1 for t in tiles if t["state"] in {"over", "high", "negative"}),

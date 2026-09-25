@@ -93,6 +93,7 @@ WITH expected (table_name, column_name, is_required, maps_to) AS (
     ('MaterialType', 'Materialtype_id', 1, 'material_type_id'),
     ('MaterialType', 'Description', 1, 'name'),
     ('MaterialType', 'Code', 1, 'name'),
+    ('MaterialType', 'Department_Id', 0, 'department_id'),
     ('Material', 'Material_id', 1, 'material_id'),
     ('Material', 'Number', 1, 'number'),
     ('Material', 'Description', 1, 'description'),

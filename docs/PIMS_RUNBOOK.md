@@ -410,3 +410,41 @@ test environment:
 
 Every hesitation is a defect in the screen, not the operator. Record them in
 `PIMS_DEFECTS.md` like any other defect.
+
+## 20. Departments, and the Acid department
+
+A department's work is the orders booked to it; its tanks are the ones holding
+what it handles (its material types, its recipes' products and ingredients,
+its open orders' products) plus the vessels its batches run in. Nothing in the
+code names a department, so one added to the data gets its own view.
+
+**Setting a terminal to its department.** On **Today**, tap the department
+under *This screen is for*. The terminal remembers it (per plant, in that
+browser). Today then shows that department's lanes and tanks only, and **Pop
+out tanks** opens a board of its tanks only. *Everything* puts it back.
+
+**Adding a department to a plant** (standalone PIMS only — a companion's
+departments are the legacy database's; add them in the desktop application):
+
+```sh
+python -m pims department list --plant DM
+python -m pims department add --code ACID --name Acid --plants DM,SC
+```
+
+**The acid department's recipe.** Acid batches run on the batch engine with a
+*yield*: the work order asks for pounds out, the plan charges `out ÷ yield`
+pounds in, and the difference is recorded as process loss on the PRODUCE rows.
+The sandbox's acid recipe — veg soapstock 90%, acid 6%, process water 4% of
+the charge, 80% yield, run in an `Acid` reactor — is a **placeholder**: nobody
+has given us the real numbers. Set them before using it:
+
+```sh
+python -m pims department recipe --code ACID --product 02001 \
+  --component 02005=90 --component 00001=6 --component 00010=4 \
+  --yield 80 --vessel Acid
+```
+
+The reactor is an ordinary location whose type is `Acid`. The recipe's yield
+decides the pounds — a batch posted with components that do not add up to the
+charge is refused — and acid batches are numbered `A-#####` so they read
+differently from blends (`B-#####`) on the floor and in Activity.

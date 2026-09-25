@@ -26,7 +26,7 @@ from .errors import AuthError, PimsError
 from .integrations import gp_sync, lims_ingest
 from .integrations import scale as scale_integration
 from .services import (
-    alerts, blend, display, inquiry, inventory, jobs, lims, numbering, orders, prefill,
+    alerts, blend, departments, display, inquiry, inventory, jobs, lims, numbering, orders, prefill,
     qc, query, reference, scan, specs,
 )
 from .util import utc_now
@@ -643,6 +643,7 @@ def set_tests(material_id: int, payload: dict = Body(...), user: dict = User) ->
 def display_tanks(
     token: str = "",
     plant_id: int | None = None,
+    department_id: int | None = None,
     authorization: str | None = Header(default=None),
     x_pims_token: str | None = Header(default=None),
 ) -> dict:
@@ -651,15 +652,17 @@ def display_tanks(
     A board on a wall screen runs on a display token (``?token=``) that can
     read this and nothing else, so it keeps running when the operator who
     opened it signs out. A signed-in user can also ask, for any plant they can see.
+    ``department_id`` narrows it to one department's tanks — a subset of what
+    the token already shows, so a token may ask for it too.
     """
 
     if token:
-        return display.tanks(display.plant_for_token(token))
+        return display.tanks(display.plant_for_token(token), department_id=department_id)
     user = current_user(authorization, x_pims_token)
     if not plant_id:
         raise PimsError("Say which plant.", fields={"plant_id": "Choose a plant."})
     security.require_plant(user, plant_id)
-    return display.tanks(plant_id)
+    return display.tanks(plant_id, department_id=department_id)
 
 
 @app.post("/api/display/token", tags=["display"], status_code=201)
@@ -696,7 +699,18 @@ def set_blend_recipe(material_id: int, payload: dict = Body(...), user: dict = U
         payload.get("components") or [],
         user,
         notes=payload.get("notes", ""),
+        department_id=payload.get("department_id") or None,
+        yield_pct=payload.get("yield_pct") or 100.0,
+        vessel_type=payload.get("vessel_type") or "Blend",
     )
+
+
+@app.get("/api/departments", tags=["reference"])
+def plant_departments(plant_id: int, user: dict = User) -> list[dict]:
+    """The plant's departments, for the operator's "my department" choice."""
+
+    security.require_plant(user, plant_id)
+    return departments.for_plant(plant_id)
 
 
 @app.get("/api/blend/plan", tags=["blend"])

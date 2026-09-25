@@ -14,6 +14,7 @@ export interface Store {
   company: Row[]
   plant: Row[]
   department: Row[]
+  plant_department: Row[]
   order_type: Row[]
   status: Row[]
   material_type: Row[]

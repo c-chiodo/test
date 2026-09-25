@@ -202,6 +202,26 @@ MIGRATIONS: list[tuple[str, str, str]] = [
         "batch_id",
         "ALTER TABLE inventory_transaction ADD COLUMN batch_id TEXT",
     ),
+    (
+        "material_type",
+        "department_id",
+        "ALTER TABLE material_type ADD COLUMN department_id INTEGER",
+    ),
+    (
+        "blend_recipe",
+        "department_id",
+        "ALTER TABLE blend_recipe ADD COLUMN department_id INTEGER",
+    ),
+    (
+        "blend_recipe",
+        "yield_pct",
+        "ALTER TABLE blend_recipe ADD COLUMN yield_pct REAL NOT NULL DEFAULT 100",
+    ),
+    (
+        "blend_recipe",
+        "vessel_type",
+        "ALTER TABLE blend_recipe ADD COLUMN vessel_type TEXT NOT NULL DEFAULT 'Blend'",
+    ),
 ]
 
 #: Indexes that must exist alongside the migrated columns. ``CREATE INDEX IF

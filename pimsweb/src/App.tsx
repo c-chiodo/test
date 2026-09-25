@@ -11,7 +11,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { ApiError, DEMO, api, setNoticeSink, token as tokenStore } from './lib/api'
-import type { Reference, User } from './lib/types'
+import type { Reference, User, Department } from './lib/types'
 import { ErrorBox, Loading, ToastProvider, useToast } from './components/ui'
 import ScanBox from './components/ScanBox'
 import PopOutTanks from './components/PopOutTanks'
@@ -45,6 +45,11 @@ interface AppState {
   kiosk: boolean
   /** A read-only mirror of the legacy PIMS: nothing here can change anything. */
   companion: boolean
+  /** The plant's departments (Loadout, Blending, Acid, ...). */
+  departments: Department[]
+  /** The department this device works for, or null for everything. */
+  department: Department | null
+  setDepartment: (id: number | null) => void
 }
 
 const AppContext = createContext<AppState | null>(null)
@@ -276,6 +281,33 @@ function Shell({
     setPlantIdState(id)
   }, [])
 
+  // The department this terminal works for is a property of the device, not
+  // the person — the kiosk in the acid building is the acid department's —
+  // so it is remembered per plant in this browser, and changed on Today.
+  const [departments, setDepartments] = useState<Department[]>([])
+  const [departmentId, setDepartmentIdState] = useState<number | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    api.get<Department[]>(`/api/departments?plant_id=${plantId}`)
+      .then((rows) => {
+        if (cancelled) return
+        setDepartments(rows)
+        let saved: number | null = null
+        try { saved = Number(localStorage.getItem(`pims.department.${plantId}`)) || null } catch { /* */ }
+        setDepartmentIdState(rows.some((d) => d.department_id === saved) ? saved : null)
+      })
+      .catch(() => { if (!cancelled) { setDepartments([]); setDepartmentIdState(null) } })
+    return () => { cancelled = true }
+  }, [plantId, nonce])
+  const setDepartment = useCallback((id: number | null) => {
+    try {
+      if (id) localStorage.setItem(`pims.department.${plantId}`, String(id))
+      else localStorage.removeItem(`pims.department.${plantId}`)
+    } catch { /* a blocked localStorage only loses the remembering */ }
+    setDepartmentIdState(id)
+  }, [plantId])
+  const department = departments.find((d) => d.department_id === departmentId) ?? null
+
   const logout = useCallback((reason = '') => {
     api.post('/api/auth/logout').catch(() => undefined).finally(() => onSignOut(reason))
   }, [onSignOut])
@@ -308,13 +340,28 @@ function Shell({
       navigate, can, kiosk, companion,
       reloadReference: () => setNonce((n) => n + 1),
       logout,
+      departments, department, setDepartment,
     } : null,
-    [user, reference, plantId, plantCode, setPlantId, health, navigate, can, logout, kiosk, companion],
+    [user, reference, plantId, plantCode, setPlantId, health, navigate, can, logout, kiosk, companion,
+      departments, department, setDepartment],
   )
 
   const page = route[0] || (kiosk ? 'today' : 'dashboard')
   const isProduction = (health?.environment || '').toUpperCase() === 'PRODUCTION'
   const kioskItems = NAV.flatMap((section) => section.items).filter((item) => item.kiosk)
+  // A department whose batches run somewhere other than the blend tank —
+  // Acid, in its reactor — gets a screen of its own, named for it, next to
+  // Blend. Nothing here knows the word "Acid": it comes from the data.
+  const nav = NAV.map((section) => ({
+    ...section,
+    items: section.items.flatMap((item): NavItem[] => item.route !== 'blend' ? [item] : [
+      item,
+      ...batchDepartments(departments).map((d) => ({
+        route: `batches/${d.department_id}`, label: d.description, icon: '⚗', writes: true,
+      })),
+    ]),
+  }))
+  const current = route.slice(0, 2).join('/')
 
   return (
     <div className="app">
@@ -328,7 +375,7 @@ function Shell({
             </div>
           </div>
           <nav className="nav">
-            {NAV.map((section) => {
+            {nav.map((section) => {
               const items = section.items.filter(
                 (item) => (!item.permission || can(item.permission)) && !(companion && item.writes),
               )
@@ -340,7 +387,7 @@ function Shell({
                     <a
                       key={item.route}
                       href={`#/${item.route}`}
-                      className={page === item.route ? 'active' : ''}
+                      className={page === item.route || current === item.route ? 'active' : ''}
                     >
                       <span className="icon">{item.icon}</span>
                       {item.label}
@@ -383,7 +430,11 @@ function Shell({
           </header>
         ) : (
           <header className="topbar">
-            <span className="title">{titleFor(page)}</span>
+            <span className="title">
+              {page === 'batches'
+                ? departments.find((d) => d.department_id === Number(route[1]))?.description ?? 'Batches'
+                : titleFor(page)}
+            </span>
             {health && (
               <span className={`env-banner${isProduction ? ' production' : ''}`}>
                 {health.environment || 'unknown'}
@@ -449,9 +500,15 @@ function Shell({
   )
 }
 
-const WRITE_ROUTES = new Set(
-  NAV.flatMap((section) => section.items).filter((item) => item.writes).map((item) => item.route),
-)
+const WRITE_ROUTES = new Set([
+  ...NAV.flatMap((section) => section.items).filter((item) => item.writes).map((item) => item.route),
+  'batches',
+])
+
+/** Departments whose batches run in a vessel of their own rather than the blend tank. */
+export function batchDepartments(departments: Department[]): Department[] {
+  return departments.filter((d) => d.vessel_types.some((v) => v !== 'Blend'))
+}
 
 /** Shown in a companion in place of a screen that exists to record changes. */
 function RecordInPims({ page }: { page: string }) {
@@ -481,10 +538,18 @@ function Route({ path }: { path: string[] }) {
       return <LoadAndShip initialOrderId={param ? Number(param) : undefined} />
     case 'blend':
       return <Blend initialOrderId={param ? Number(param) : undefined} />
+    case 'batches':
+      return (
+        <Blend
+          key={param}
+          departmentId={Number(param)}
+          initialOrderId={path[2] ? Number(path[2]) : undefined}
+        />
+      )
     case 'today':
       return <Today />
     case 'operations':
-      return <Operations initialOperation={param} />
+      return <Operations key={path.join('/')} initialOperation={param} orderId={path[2] ? Number(path[2]) : undefined} />
     case 'inventory':
       return <Inventory />
     case 'inquiry':
@@ -507,6 +572,7 @@ function titleFor(page: string): string {
     orders: 'Orders',
     'load-ship': 'Load & ship',
     blend: 'Blend',
+    batches: 'Batches',
     operations: 'Plant floor',
     inventory: 'Inventory',
     inquiry: 'Inquiry',
